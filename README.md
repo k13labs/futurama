@@ -12,10 +12,19 @@ Here's a simple example.
 
 ```clj
 (ns user
-  (:require [futurama.core :refer [async !<!! !<!]]))
+  (:require [futurama.core :refer [async !<!! !<!]])
+  (:import [java.util.concurrent CompletableFuture]))
 
-...
+(defn future-thing
+  [what]
+  (CompletableFuture/completedFuture (format "%s: done" what)))
+
+(async
+  (println (!<! (future-thing "laundry"))))
+;;; => prints out: "laundry: done"
 ```
+
+See the existing tests for more examples.
 
 # _Building_
 
