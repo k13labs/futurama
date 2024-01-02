@@ -1,5 +1,5 @@
 (ns futurama.core
-  (:require [clojure.core.async :refer [go <! <!! take!]]
+  (:require [clojure.core.async :refer [<! <!! take!]]
             [clojure.core.async.impl.protocols :as impl]
             [clojure.core.async.impl.channels :refer [box]]
             [clojure.core.async.impl.ioc-macros :as ioc])

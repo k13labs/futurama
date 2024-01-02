@@ -1,7 +1,7 @@
 (ns futurama.core-test
   (:require [clojure.test :refer [deftest testing is]]
             [futurama.core :refer [!<!! !<! async completable-future]]
-            [clojure.core.async :refer [go timeout put! take! close! chan <! >! <!! >!!] :as a])
+            [clojure.core.async :refer [go timeout put! take! <! >! <!!] :as a])
   (:import [java.util.concurrent CompletableFuture]
            [clojure.lang ExceptionInfo]))
 
@@ -50,7 +50,9 @@
                        (completable-future
                          (go
                            (<! (timeout 50))
-                           {:foo "bar"}))))))
+                           (let [c (CompletableFuture.)]
+                             (>! c {:foo "bar"})
+                             c)))))))
            {:foo "bar"})))
   (testing "nested non-blocking take - !<!"
     (<!!
@@ -61,7 +63,7 @@
                            (completable-future
                              (go
                                (<! (timeout 50))
-                               {:foo "bar"}))))))
+                               (CompletableFuture/completedFuture {:foo "bar"})))))))
                {:foo "bar"}))))))
 
 (deftest error-handling
