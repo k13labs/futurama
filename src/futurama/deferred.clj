@@ -3,9 +3,7 @@
             [clojure.core.async.impl.protocols :as impl]
             [clojure.core.async.impl.channels :refer [box]]
             [manifold.deferred :as d])
-  (:import [java.util.concurrent
-            CompletableFuture]
-           [java.util.concurrent.locks Lock]
+  (:import [java.util.concurrent.locks Lock]
            [manifold.deferred IDeferred]))
 
 (extend-type IDeferred

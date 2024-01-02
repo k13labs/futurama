@@ -13,14 +13,14 @@
     (let [^CompletableFuture f (CompletableFuture.)
           v {:foo "bar"}]
       (put! f v)
-      (is (= @f v))))
+      (is (= v @f))))
   (testing "async take! test"
     (let [^CompletableFuture f (CompletableFuture.)
           v {:foo "bar"}
           p (promise)]
       (take! f (partial deliver p))
       (.complete f v)
-      (is (= @p v))))
+      (is (= v @p))))
   (testing "bindings test blocking - !<!!"
     (binding [*test-val1* 100]
       (with-redefs [test-val2 200]
@@ -44,7 +44,8 @@
                      (completable-future
                        [*test-val1* test-val2])))))))))
   (testing "nested blocking take - !<!!"
-    (is (= (!<!! (async
+    (is (= {:foo "bar"}
+           (!<!! (async
                    (go
                      (CompletableFuture/completedFuture
                        (completable-future
@@ -52,19 +53,18 @@
                            (<! (timeout 50))
                            (let [c (CompletableFuture.)]
                              (>! c {:foo "bar"})
-                             c)))))))
-           {:foo "bar"})))
+                             c))))))))))
   (testing "nested non-blocking take - !<!"
     (<!!
       (async
-        (is (= (!<!! (async
+        (is (= {:foo "bar"}
+               (!<!! (async
                        (go
                          (CompletableFuture/completedFuture
                            (completable-future
                              (go
                                (<! (timeout 50))
-                               (CompletableFuture/completedFuture {:foo "bar"})))))))
-               {:foo "bar"}))))))
+                               (CompletableFuture/completedFuture {:foo "bar"})))))))))))))
 
 (deftest error-handling
   (testing "throws async exception on take !<!"
