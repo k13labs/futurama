@@ -1,7 +1,6 @@
 .PHONY: repl test clean deploy install format-check format-fix
 
 SHELL := /bin/bash
-VERSION := 0.2.1
 
 repl:
 	clojure -M:dev:test:repl
@@ -17,12 +16,7 @@ lint:
 	clojure -M:dev:test:clj-kondo --lint "src:test" --fail-level "error"
 
 build:
-	clojure -Spom
-	clojure -X:jar \
-		:sync-pom true \
-		:group-id "com.github.k13labs" \
-		:artifact-id "futurama" \
-		:version '"$(VERSION)"'
+	clojure -X:jar :sync-pom true
 
 deploy: clean build
 	clojure -X:deploy-maven
