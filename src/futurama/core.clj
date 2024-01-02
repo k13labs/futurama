@@ -7,6 +7,8 @@
   (:import [clojure.lang Var]
            [java.util.concurrent
             CompletableFuture
+            CompletionException
+            ExecutionException
             ExecutorService
             Future
             ForkJoinPool]
@@ -14,6 +16,22 @@
            [java.util.function Function BiConsumer]))
 
 (def ^:dynamic *thread-pool* (ForkJoinPool/commonPool))
+
+(defn unwrap-exception
+  "unwraps an ExecutionException or CompletionException via ex-cause until the root exception is returned"
+  [^Exception ex]
+  (if-let [ce (and (or (instance? ExecutionException ex)
+                       (instance? CompletionException ex))
+                   (ex-cause ex))]
+    ce
+    ex))
+
+(defn rethrow-exception
+  "throw v if it is an Exception"
+  [v]
+  (if (instance? Exception v)
+    (throw (unwrap-exception v))
+    v))
 
 (defmacro completable-future
   "Asynchronously invokes the body inside a completable future, preserves the current thread binding frame,
@@ -28,7 +46,7 @@
                               (Var/resetThreadBindingFrame binding-frame#) ;;; set the Clojure binding frame captured above
                               (.complete res-fut# (do ~@body)) ;;; send the result of evaluating the body to the CompletableFuture
                               (catch Exception ~'e
-                                (.completeExceptionally res-fut# ~'e)))) ;;; if we catch an exception we send it to the CompletableFuture
+                                (.completeExceptionally res-fut# (unwrap-exception ~'e))))) ;;; if we catch an exception we send it to the CompletableFuture
          ^Future fut# (.submit pool# fbody#)
          ^Function cancel# (reify Function
                              (apply [~'_ ~'_]
@@ -53,7 +71,7 @@
           (let [val (try
                       (.getNow fut nil)
                       (catch Exception e
-                        e))]
+                        (unwrap-exception e)))]
             (if (satisfies? impl/ReadPort val)
               (do
                 (take! val (fn do-read
@@ -102,7 +120,10 @@
           (when (impl/active? handler)
             (impl/commit handler))
           (.unlock handler)
-          (box (.complete fut val))))))
+          (box
+           (if (instance? Exception val)
+             (.completeExceptionally fut ^Exception val)
+             (.complete fut val)))))))
 
   impl/Channel
   (close! [fut]
@@ -134,7 +155,7 @@
                                             f# ~(ioc/state-machine `(try
                                                                       ~@body
                                                                       (catch Exception ~'e
-                                                                        ~'e)) 1 [crossing-env &env] ioc/async-custom-terminators)
+                                                                        (unwrap-exception ~'e))) 1 [crossing-env &env] ioc/async-custom-terminators)
                                             state# (-> (f#)
                                                        (ioc/aset-all! ioc/USER-START-IDX c#
                                                                       ioc/BINDINGS-IDX captured-bindings#))]
@@ -148,10 +169,7 @@
   - Will park if nothing is available.
   - Will throw if an Exception is taken from port."
   [v]
-  `(let [~'v (<! ~v)]
-     (if (instance? Exception ~'v)
-       (throw ~'v)
-       ~'v)))
+  `(rethrow-exception (<! ~v)))
 
 (defmacro !<!!
   "An improved macro version of <!!, which also rethrows exceptions returned over the channel.
@@ -160,7 +178,4 @@
   - Will block if nothing is available.
   - Will throw if a Exception is taken from port."
   [v]
-  `(let [~'v (<!! ~v)]
-     (if (instance? Exception ~'v)
-       (throw ~'v)
-       ~'v)))
+  `(rethrow-exception (<!! ~v)))

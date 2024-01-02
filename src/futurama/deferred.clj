@@ -37,7 +37,10 @@
       (when (impl/active? handler)
         (impl/commit handler))
       (.unlock handler)
-      (box (d/success! d val))))
+      (box
+       (if (instance? Exception val)
+         (d/error! d val)
+         (d/success! d val)))))
 
   impl/Channel
   (close! [d]

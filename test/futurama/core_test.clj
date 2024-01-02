@@ -2,7 +2,7 @@
   (:require [clojure.test :refer [deftest testing is]]
             [futurama.core :refer [!<!! !<! async completable-future]]
             [clojure.core.async :refer [go timeout put! take! <! >! <!!] :as a])
-  (:import [java.util.concurrent CompletableFuture]
+  (:import [java.util.concurrent CompletableFuture ExecutionException]
            [clojure.lang ExceptionInfo]))
 
 (def ^:dynamic *test-val1* nil)
@@ -67,7 +67,24 @@
                                (CompletableFuture/completedFuture {:foo "bar"})))))))))))))
 
 (deftest error-handling
-  (testing "throws async exception on take !<!"
+  (testing "throws async exception on blocking deref - @"
+    (is (thrown-with-msg?
+          ExceptionInfo #"foobar"
+          (try
+            @(async
+               (throw (ex-info "foobar" {}))
+               ::result)
+            ;;; this is just necessary to test when an exception is thrown
+            ;;; via Deref it is wrapped in an ExecutionException
+            (catch ExecutionException ee
+              (throw (ex-cause ee)))))))
+  (testing "throws async exception on blocking take - !<!!"
+    (is (thrown-with-msg?
+          ExceptionInfo #"foobar"
+          (!<!! (async
+                  (throw (ex-info "foobar" {}))
+                  ::result)))))
+  (testing "throws async rxception on non-blocking take - !<!"
     (<!!
       (async
         (is (thrown-with-msg?
