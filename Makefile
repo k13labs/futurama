@@ -1,7 +1,7 @@
 .PHONY: repl test clean deploy install format-check format-fix
 
 SHELL := /bin/bash
-VERSION := 0.3.0
+VERSION := 0.2.1
 
 repl:
 	clojure -M:dev:test:repl
