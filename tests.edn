@@ -1,0 +1,13 @@
+#kaocha/v1 {:capture-output?                 true
+            :kaocha/fail-fast?               true
+            :plugins                         [:kaocha.plugin/profiling
+                                              :kaocha.plugin/gc-profiling
+                                              :kaocha.plugin/print-invocations
+                                              :kaocha.plugin/hooks
+                                              :preloads]
+            :kaocha.hooks/pre-report         [futurama.test-setup/defuse-zero-assertions]
+            :kaocha.plugin.preloads/ns-names [futurama.test-setup]
+            :tests                           [{:id        :unit
+                                               :kaocha/source-paths             ["src"]
+                                               :kaocha/test-paths               ["test"]
+                                               :ns-patterns                     [".*"]}]}
