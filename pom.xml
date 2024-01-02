@@ -4,7 +4,7 @@
   <packaging>jar</packaging>
   <groupId>com.github.k13labs</groupId>
   <artifactId>futurama</artifactId>
-  <version>0.3.0</version>
+  <version>0.3.1</version>
   <name>futurama</name>
   <licenses>
     <license>
@@ -16,7 +16,7 @@
     <url>https://github.com/k13labs/futurama</url>
     <connection>scm:git:git://github.com/k13labs/futurama.git</connection>
     <developerConnection>scm:git:ssh://git@github.com/k13labs/futurama.git</developerConnection>
-    <tag>0.3.0</tag>
+    <tag>0.3.1</tag>
   </scm>
   <dependencies>
     <dependency>

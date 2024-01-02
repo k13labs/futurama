@@ -1,5 +1,8 @@
 This is a history of changes to k13labs/futurama
 
+# 0.3.1
+* Add new `async?` helper function which is useful
+
 # 0.3.0
 * Add better identity-like raw value handling for `!<!` and `!<!!`
 
