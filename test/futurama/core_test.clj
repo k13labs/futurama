@@ -9,6 +9,12 @@
 (def test-val2 nil)
 
 (deftest async-ops
+  (testing "raw value handling - !<!"
+    (let [v {:foo "bar"}]
+      (is (= v (!<! v)))))
+  (testing "raw value handling - !<!!"
+    (let [v {:foo "bar"}]
+      (is (= v (!<!! v)))))
   (testing "async put! test"
     (let [^CompletableFuture f (CompletableFuture.)
           v {:foo "bar"}]

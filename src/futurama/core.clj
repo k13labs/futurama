@@ -167,15 +167,25 @@
   Must be called INSIDE a (go ...) or (async ...) block.
   - Will return nil if closed.
   - Will park if nothing is available.
-  - Will throw if an Exception is taken from port."
+  - Will throw if an Exception is taken from port.
+  - Will return the raw value if it is not a ReadPort"
   [v]
-  `(rethrow-exception (<! ~v)))
+  `(rethrow-exception
+    (let [~'r ~v]
+      (if (satisfies? impl/ReadPort ~'r)
+        (<! ~'r)
+        ~'r))))
 
 (defmacro !<!!
   "An improved macro version of <!!, which also rethrows exceptions returned over the channel.
   Must be called OUTSIDE a (go ...) or (async ...) block.
   - Will return nil if closed.
   - Will block if nothing is available.
-  - Will throw if a Exception is taken from port."
+  - Will throw if a Exception is taken from port.
+  - Will return the raw value if it is not a ReadPort"
   [v]
-  `(rethrow-exception (<!! ~v)))
+  `(rethrow-exception
+    (let [~'r ~v]
+      (if (satisfies? impl/ReadPort ~'r)
+        (<!! ~'r)
+        ~'r))))
