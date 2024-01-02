@@ -1,6 +1,6 @@
 (ns futurama.core-test
   (:require [clojure.test :refer [deftest testing is]]
-            [futurama.core :refer [!<!! !<! async completable-future]]
+            [futurama.core :refer [!<!! !<! async async? completable-future]]
             [clojure.core.async :refer [go timeout put! take! <! >! <!!] :as a])
   (:import [java.util.concurrent CompletableFuture ExecutionException]
            [clojure.lang ExceptionInfo]))
@@ -9,6 +9,12 @@
 (def test-val2 nil)
 
 (deftest async-ops
+  (testing "async? for CompletableFuture"
+    (is (true? (async? (CompletableFuture/completedFuture "yes")))))
+  (testing "async? for core.async channel"
+    (is (true? (async? (go "yes")))))
+  (testing "async? for raw value"
+    (is (false? (async? "no"))))
   (testing "raw value handling - !<!"
     (let [v {:foo "bar"}]
       (is (= v (!<! v)))))

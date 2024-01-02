@@ -33,6 +33,11 @@
     (throw (unwrap-exception v))
     v))
 
+(defn async?
+  "returns true if v satisfies? core.async's `ReadPort`"
+  [v]
+  (satisfies? impl/ReadPort v))
+
 (defmacro completable-future
   "Asynchronously invokes the body inside a completable future, preserves the current thread binding frame,
   using by default the `ForkJoinPool/commonPool`, the pool used can be specified via `*thread-pool*` binding."
