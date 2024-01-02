@@ -1,7 +1,6 @@
 #kaocha/v1 {:capture-output?                 true
             :kaocha/fail-fast?               true
             :plugins                         [:kaocha.plugin/profiling
-                                              :kaocha.plugin/gc-profiling
                                               :kaocha.plugin/print-invocations
                                               :kaocha.plugin/hooks
                                               :preloads]
