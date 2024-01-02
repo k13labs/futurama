@@ -2,7 +2,8 @@
   (:require [clojure.core.async :refer [<! <!! take!]]
             [clojure.core.async.impl.protocols :as impl]
             [clojure.core.async.impl.channels :refer [box]]
-            [clojure.core.async.impl.ioc-macros :as ioc])
+            [clojure.core.async.impl.ioc-macros :as ioc]
+            [futurama.deferred])
   (:import [clojure.lang Var]
            [java.util.concurrent
             CompletableFuture
