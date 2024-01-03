@@ -1,6 +1,8 @@
 (ns futurama.core-test
   (:require [clojure.test :refer [deftest testing is]]
-            [futurama.core :refer [!<!! !<! async async-for async? completable-future]]
+            [futurama.core :refer [!<!! !<! async async-for async-map
+                                   async-some async-every?
+                                   async? completable-future]]
             [clojure.core.async :refer [go timeout put! take! <! >! <!!] :as a]
             [criterium.core :refer [report-result
                                     quick-benchmark
@@ -10,6 +12,43 @@
 
 (def ^:dynamic *test-val1* nil)
 (def test-val2 nil)
+
+(deftest async-some-test
+  (testing "works the same way as a some fn"
+    (let [state1 (atom 0)
+          take-fn1 #(swap! state1 inc)
+          state2 (atom 0)
+          take-fn2 #(swap! state2 inc)
+          list1 (repeatedly take-fn1)
+          list2 (repeatedly take-fn2)]
+      (is (= 10
+             (some #{10} list1)
+             @state1))
+      (is (= 10
+             (!<!! (async-some #(async (#{10} %)) list2))
+             @state2)))))
+
+(deftest async-every-test
+  (testing "works the same way as a every? fn"
+    (let [state1 (atom 0)
+          take-fn1 #(swap! state1 inc)
+          state2 (atom 0)
+          take-fn2 #(swap! state2 inc)
+          list1 (repeatedly take-fn1)
+          list2 (repeatedly take-fn2)]
+      (is (false? (every? #(< % 10) list1)))
+      (is (= 10
+             @state1))
+      (is (false? (!<!! (async-every? #(async (< % 10)) list2))))
+      (is (= 10
+             @state2)))))
+
+(deftest async-map-test
+  (testing "works the same way as a map fn with multiple colls"
+    (let [args (repeat 10 (range 10))]
+      (is (= [0 10 20 30 40 50 60 70 80 90]
+             (apply map + args)
+             (!<!! (apply async-map #(async (apply + %&)) args)))))))
 
 (deftest async-for-test
   (testing "can loop for using async ops"

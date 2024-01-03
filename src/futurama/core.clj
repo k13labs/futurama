@@ -215,3 +215,42 @@
       (if (nil? ~'outf)
         ~'outv
         (recur ~'more (conj ~'outv (!<! ~'outf)))))))
+
+(defn async-map
+  "Asynchronously returns the result of applying f to
+  the set of first items of each coll, followed by applying f to the
+  set of second items in each coll, until any one of the colls is
+  exhausted.  Any remaining items in other colls are ignored. Function
+  f should accept number-of-colls arguments."
+  [f coll & coll-seq]
+  (let [colls (cons coll coll-seq)
+        param-seq (->> (apply interleave colls)
+                       (partition (count colls)))]
+    (async-for
+     [params param-seq]
+     (apply f params))))
+
+(defn async-some
+  "Asynchronously returns the first logical true value of calling pred for any x in coll,
+  else nil.  One common idiom is to use a set as pred, for example
+  this will return :fred if :fred is in the sequence, otherwise nil:
+  `(some #{:fred} coll)`"
+  [pred coll]
+  (async
+   (loop [coll coll]
+     (if-let [res (!<! (pred (first coll)))]
+       res
+       (when-let [more (next coll)]
+         (recur more))))))
+
+(defn async-every?
+  "Returns true if `(pred x)` is logical true for every x in coll, else false."
+  [pred coll]
+  (async
+   (loop [coll coll]
+     (if
+      (nil? (seq coll)) true
+      (let [res (!<! (pred (first coll)))]
+        (if-not res
+          false
+          (recur (next coll))))))))

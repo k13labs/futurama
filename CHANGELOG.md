@@ -1,5 +1,8 @@
 This is a history of changes to k13labs/futurama
 
+# 0.3.5
+* Add more async collection fns: `async-map`, `async-some`, `async-every?`
+
 # 0.3.4
 * Simplify `async-for` by just executing each iteration inside an async block and then collect after
 
