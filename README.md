@@ -21,15 +21,17 @@ Here's a simple example.
 
 (async
   (println (!<! (future-thing "laundry"))))
-
-(async-for
-  [a (range 4)
-   b (range 4)
-   :let [c (+ a b)]
-   :when (and (odd? a) (odd? b))]
-  (!<! (timeout 10)) ;;; can use !<! inside `async-for` comprehension
-  [a b c (+ a b c)])
 ;;; => prints out: "laundry: done"
+
+(!<!!
+  (async-for
+    [a (range 4)
+     b (range 4)
+     :let [c (+ a b)]
+     :when (and (odd? a) (odd? b))]
+    (!<! (timeout 10)) ;;; can use !<! inside `async-for` comprehension
+    [a b c (+ a b c)]))
+;;; => returns `[[1 1 2 4] [1 3 4 8] [3 1 4 8] [3 3 6 12]]`
 ```
 
 See the existing tests for more examples.
