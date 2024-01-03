@@ -17,6 +17,12 @@
 
 (def ^:dynamic *thread-pool* (ForkJoinPool/commonPool))
 
+(defn dispatch
+  "dispatch the function by submitting it to the `*thread-pool*`"
+  [^Runnable f]
+  (let [^ExecutorService pool (or *thread-pool* (ForkJoinPool/commonPool))]
+    (.submit ^ExecutorService pool ^Runnable f)))
+
 (defn unwrap-exception
   "unwraps an ExecutionException or CompletionException via ex-cause until the root exception is returned"
   [^Exception ex]
@@ -44,7 +50,6 @@
   ^CompletableFuture [& body]
   `(let [binding-frame# (Var/cloneThreadBindingFrame) ;;; capture the thread local binding frame before start
          ^CompletableFuture res-fut# (CompletableFuture.) ;;; this is the CompletableFuture being returned
-         ^ExecutorService pool# (or *thread-pool* (ForkJoinPool/commonPool))
          ^Runnable fbody# (fn do-complete#
                             []
                             (try
@@ -52,7 +57,7 @@
                               (.complete res-fut# (do ~@body)) ;;; send the result of evaluating the body to the CompletableFuture
                               (catch Exception ~'e
                                 (.completeExceptionally res-fut# (unwrap-exception ~'e))))) ;;; if we catch an exception we send it to the CompletableFuture
-         ^Future fut# (.submit ^ExecutorService pool# ^Runnable fbody#)
+         ^Future fut# (dispatch fbody#)
          ^Function cancel# (reify Function
                              (apply [~'_ ~'_]
                                (future-cancel fut#)))] ;;; submit the work to the pool and get the FutureTask doing the work
@@ -154,17 +159,16 @@
   (let [crossing-env (zipmap (keys &env) (repeatedly gensym))]
     `(let [c# (CompletableFuture.)
            captured-bindings# (Var/getThreadBindingFrame)]
-       (.submit ^ExecutorService *thread-pool*
-                ^Runnable (^:once fn* []
-                                      (let [~@(mapcat (fn [[l sym]] [sym `(^:once fn* [] ~(vary-meta l dissoc :tag))]) crossing-env)
-                                            f# ~(ioc/state-machine `(try
-                                                                      ~@body
-                                                                      (catch Exception ~'e
-                                                                        (unwrap-exception ~'e))) 1 [crossing-env &env] ioc/async-custom-terminators)
-                                            state# (-> (f#)
-                                                       (ioc/aset-all! ioc/USER-START-IDX c#
-                                                                      ioc/BINDINGS-IDX captured-bindings#))]
-                                        (ioc/run-state-machine-wrapped state#))))
+       (dispatch (^:once fn* []
+                             (let [~@(mapcat (fn [[l sym]] [sym `(^:once fn* [] ~(vary-meta l dissoc :tag))]) crossing-env)
+                                   f# ~(ioc/state-machine `(try
+                                                             ~@body
+                                                             (catch Exception ~'e
+                                                               (unwrap-exception ~'e))) 1 [crossing-env &env] ioc/async-custom-terminators)
+                                   state# (-> (f#)
+                                              (ioc/aset-all! ioc/USER-START-IDX c#
+                                                             ioc/BINDINGS-IDX captured-bindings#))]
+                               (ioc/run-state-machine-wrapped state#))))
        c#)))
 
 (defmacro !<!
@@ -202,39 +206,12 @@
   the for can contain `<!` and `!<!` calls. This is implicitly wrapped in
   an `async` block."
   [bindings & body]
-  (let [pairs (partition 2 bindings)
-        bvars (loop [[pair & more] pairs
-                     vars []]
-                (if (nil? pair)
-                  vars
-                  (let [[pk pv] pair
-                        [vars pairs]
-                        (if (= pk :let)
-                          [vars
-                           (concat more (partition 2 pv))]
-                          [(reduce
-                            (fn flatten-reducer
-                              [vs v]
-                              (cond
-                                (symbol? v)
-                                (conj vs v)
-
-                                (coll? v)
-                                (into vs (reduce flatten-reducer [] v))
-
-                                :else
-                                vs))
-                            vars
-                            [pk])
-                           more])]
-                    (recur pairs vars))))]
-    `(async
-      (loop [[vars# & more#] (doall
+  `(async
+    (loop [[~'outf & ~'more] (doall
                               (for [~@bindings]
-                                [~@bvars]))
-             outv# []]
-        (if (nil? vars#)
-          outv#
-          (let [[~@bvars] vars#
-                out# (do ~@body)]
-            (recur more# (conj outv# out#))))))))
+                                (async
+                                 ~@body)))
+           ~'outv []]
+      (if (nil? ~'outf)
+        ~'outv
+        (recur ~'more (conj ~'outv (!<! ~'outf)))))))

@@ -1,7 +1,10 @@
 (ns futurama.core-test
   (:require [clojure.test :refer [deftest testing is]]
             [futurama.core :refer [!<!! !<! async async-for async? completable-future]]
-            [clojure.core.async :refer [go timeout put! take! <! >! <!!] :as a])
+            [clojure.core.async :refer [go timeout put! take! <! >! <!!] :as a]
+            [criterium.core :refer [report-result
+                                    quick-benchmark
+                                    with-progress-reporting]])
   (:import [java.util.concurrent CompletableFuture ExecutionException]
            [clojure.lang ExceptionInfo]))
 
@@ -11,13 +14,27 @@
 (deftest async-for-test
   (testing "can loop for using async ops"
     (is (= [[1 1 2 4] [1 3 4 8] [3 1 4 8] [3 3 6 12]]
-           (!<!!
+           (<!!
              (async-for [a (range 4)
                          b (range 4)
                          :let [c (+ a b)]
                          :when (and (odd? a) (odd? b))]
-                        (!<! (timeout 10))
-                        [a b c (+ a b c)]))))))
+                        (!<! (timeout 50))
+                        [a b c (+ a b c)])))))
+  (testing "can loop for concurrently, performance test"
+    (let [bench (with-progress-reporting
+                  (quick-benchmark
+                    (<!!
+                      (async-for [a (range 4)
+                                  b (range 4)
+                                  :let [c (+ a b)]
+                                  :when (and (odd? a) (odd? b))]
+                                 (!<! (timeout 50))
+                                 [a b c (+ a b c)]))
+                    {:verbose true}))
+          [mean [lower upper]] (:mean bench)]
+      (report-result bench)
+      (is (<= 0.05 lower mean upper 0.07)))))
 
 (deftest async-ops
   (testing "async? for CompletableFuture"
