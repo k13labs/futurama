@@ -52,7 +52,7 @@
                               (.complete res-fut# (do ~@body)) ;;; send the result of evaluating the body to the CompletableFuture
                               (catch Exception ~'e
                                 (.completeExceptionally res-fut# (unwrap-exception ~'e))))) ;;; if we catch an exception we send it to the CompletableFuture
-         ^Future fut# (.submit pool# fbody#)
+         ^Future fut# (.submit ^ExecutorService pool# ^Runnable fbody#)
          ^Function cancel# (reify Function
                              (apply [~'_ ~'_]
                                (future-cancel fut#)))] ;;; submit the work to the pool and get the FutureTask doing the work
@@ -194,3 +194,47 @@
       (if (satisfies? impl/ReadPort ~'r)
         (<!! ~'r)
         ~'r))))
+
+(defmacro async-for
+  "works like a for macro, but supports core.async operations.
+  bindings are initially bound and collected, then the data is iterated
+  over using a loop and the output collected; note that only the body of
+  the for can contain `<!` and `!<!` calls. This is implicitly wrapped in
+  an `async` block."
+  [bindings & body]
+  (let [pairs (partition 2 bindings)
+        bvars (loop [[pair & more] pairs
+                     vars []]
+                (if (nil? pair)
+                  vars
+                  (let [[pk pv] pair
+                        [vars pairs]
+                        (if (= pk :let)
+                          [vars
+                           (concat more (partition 2 pv))]
+                          [(reduce
+                            (fn flatten-reducer
+                              [vs v]
+                              (cond
+                                (symbol? v)
+                                (conj vs v)
+
+                                (coll? v)
+                                (into vs (reduce flatten-reducer [] v))
+
+                                :else
+                                vs))
+                            vars
+                            [pk])
+                           more])]
+                    (recur pairs vars))))]
+    `(async
+      (loop [[vars# & more#] (doall
+                              (for [~@bindings]
+                                [~@bvars]))
+             outv# []]
+        (if (nil? vars#)
+          outv#
+          (let [[~@bvars] vars#
+                out# (do ~@body)]
+            (recur more# (conj outv# out#))))))))

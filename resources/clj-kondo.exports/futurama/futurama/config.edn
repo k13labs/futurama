@@ -1,0 +1,1 @@
+{:lint-as {futurama.core/async-for clojure.core/for}}
