@@ -1,5 +1,8 @@
 This is a history of changes to k13labs/futurama
 
+# 0.3.2
+* Ensure Deferred is handled correctly on put! when realized
+
 # 0.3.1
 * Add new `async?` helper function which is useful
 

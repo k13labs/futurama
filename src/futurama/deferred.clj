@@ -33,14 +33,22 @@
     (let [^Lock handler handler]
       (when (nil? val)
         (throw (IllegalArgumentException. "Can't put nil on channel")))
-      (.lock handler)
-      (when (impl/active? handler)
-        (impl/commit handler))
-      (.unlock handler)
-      (box
-       (if (instance? Exception val)
-         (d/error! d val)
-         (d/success! d val)))))
+      (if (d/realized? d)
+        (do
+          (.lock handler)
+          (when (impl/active? handler)
+            (impl/commit handler))
+          (.unlock handler)
+          (box false))
+        (do
+          (.lock handler)
+          (when (impl/active? handler)
+            (impl/commit handler))
+          (.unlock handler)
+          (box
+           (if (instance? Exception val)
+             (d/error! d val)
+             (d/success! d val)))))))
 
   impl/Channel
   (close! [d]

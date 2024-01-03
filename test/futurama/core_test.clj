@@ -25,6 +25,7 @@
     (let [^CompletableFuture f (CompletableFuture.)
           v {:foo "bar"}]
       (put! f v)
+      (put! f {:foo "baz"})
       (is (= v @f))))
   (testing "async take! test"
     (let [^CompletableFuture f (CompletableFuture.)

@@ -18,6 +18,19 @@
       (take! d (partial deliver p))
       (d/success! d v)
       (is (= v @p))))
+  (testing "async put! test"
+    (let [d (d/deferred)
+          v {:foo "bar"}]
+      (put! d v)
+      (put! d {:foo "baz"})
+      (is (= v @d))))
+  (testing "async take! test"
+    (let [d (d/deferred)
+          v {:foo "bar"}
+          p (promise)]
+      (take! d (partial deliver p))
+      (d/success! d v)
+      (is (= v @p))))
   (testing "nested blocking take - !<!!"
     (is (= {:foo "bar"}
            (!<!! (async
