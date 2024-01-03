@@ -46,12 +46,12 @@
     (<!!
       (async
         (is (= {:foo "bar"}
-               (!<!! (async
-                       (go
-                         (CompletableFuture/completedFuture
-                           (completable-future
-                             (go
-                               (<! (timeout 50))
-                               (let [d (d/deferred)]
-                                 (d/success! d {:foo "bar"})
-                                 d)))))))))))))
+               (!<! (async
+                      (go
+                        (CompletableFuture/completedFuture
+                          (completable-future
+                            (go
+                              (<! (timeout 50))
+                              (let [d (d/deferred)]
+                                (d/success! d {:foo "bar"})
+                                d)))))))))))))

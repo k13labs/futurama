@@ -1,5 +1,8 @@
 This is a history of changes to k13labs/futurama
 
+# 0.3.3
+* Add `async-for` comprehension which implicitly runs inside an async block
+
 # 0.3.2
 * Ensure Deferred is handled correctly on put! when realized
 

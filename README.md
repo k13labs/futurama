@@ -12,7 +12,7 @@ Here's a simple example.
 
 ```clj
 (ns user
-  (:require [futurama.core :refer [async !<!! !<!]])
+  (:require [futurama.core :refer [async async-for !<!! !<!]])
   (:import [java.util.concurrent CompletableFuture]))
 
 (defn future-thing
@@ -21,6 +21,14 @@ Here's a simple example.
 
 (async
   (println (!<! (future-thing "laundry"))))
+
+(async-for
+  [a (range 4)
+   b (range 4)
+   :let [c (+ a b)]
+   :when (and (odd? a) (odd? b))]
+  (!<! (timeout 10)) ;;; can use !<! inside `async-for` comprehension
+  [a b c (+ a b c)])
 ;;; => prints out: "laundry: done"
 ```
 

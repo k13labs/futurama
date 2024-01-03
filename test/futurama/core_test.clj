@@ -1,12 +1,23 @@
 (ns futurama.core-test
   (:require [clojure.test :refer [deftest testing is]]
-            [futurama.core :refer [!<!! !<! async async? completable-future]]
+            [futurama.core :refer [!<!! !<! async async-for async? completable-future]]
             [clojure.core.async :refer [go timeout put! take! <! >! <!!] :as a])
   (:import [java.util.concurrent CompletableFuture ExecutionException]
            [clojure.lang ExceptionInfo]))
 
 (def ^:dynamic *test-val1* nil)
 (def test-val2 nil)
+
+(deftest async-for-test
+  (testing "can loop for using async ops"
+    (is (= [[1 1 2 4] [1 3 4 8] [3 1 4 8] [3 3 6 12]]
+           (!<!!
+             (async-for [a (range 4)
+                         b (range 4)
+                         :let [c (+ a b)]
+                         :when (and (odd? a) (odd? b))]
+                        (!<! (timeout 10))
+                        [a b c (+ a b c)]))))))
 
 (deftest async-ops
   (testing "async? for CompletableFuture"
@@ -71,13 +82,13 @@
     (<!!
       (async
         (is (= {:foo "bar"}
-               (!<!! (async
-                       (go
-                         (CompletableFuture/completedFuture
-                           (completable-future
-                             (go
-                               (<! (timeout 50))
-                               (CompletableFuture/completedFuture {:foo "bar"})))))))))))))
+               (!<! (async
+                      (go
+                        (CompletableFuture/completedFuture
+                          (completable-future
+                            (go
+                              (<! (timeout 50))
+                              (CompletableFuture/completedFuture {:foo "bar"})))))))))))))
 
 (deftest error-handling
   (testing "throws async exception on blocking deref - @"
