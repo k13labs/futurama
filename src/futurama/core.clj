@@ -25,7 +25,7 @@
 
 (defn unwrap-exception
   "unwraps an ExecutionException or CompletionException via ex-cause until the root exception is returned"
-  [^Exception ex]
+  [^Throwable ex]
   (if-let [ce (and (or (instance? ExecutionException ex)
                        (instance? CompletionException ex))
                    (ex-cause ex))]
@@ -35,7 +35,7 @@
 (defn rethrow-exception
   "throw v if it is an Exception"
   [v]
-  (if (instance? Exception v)
+  (if (instance? Throwable v)
     (throw (unwrap-exception v))
     v))
 
@@ -55,7 +55,7 @@
                             (try
                               (Var/resetThreadBindingFrame binding-frame#) ;;; set the Clojure binding frame captured above
                               (.complete res-fut# (do ~@body)) ;;; send the result of evaluating the body to the CompletableFuture
-                              (catch Exception ~'e
+                              (catch Throwable ~'e
                                 (.completeExceptionally res-fut# (unwrap-exception ~'e))))) ;;; if we catch an exception we send it to the CompletableFuture
          ^Future fut# (dispatch fbody#)
          ^Function cancel# (reify Function
@@ -80,7 +80,7 @@
         (if (.isDone fut)
           (let [val (try
                       (.getNow fut nil)
-                      (catch Exception e
+                      (catch Throwable e
                         (unwrap-exception e)))]
             (if (satisfies? impl/ReadPort val)
               (do
@@ -116,8 +116,6 @@
   (put! [fut val handler]
     (let [^CompletableFuture fut fut
           ^Lock handler handler]
-      (when (nil? val)
-        (throw (IllegalArgumentException. "Can't put nil on channel")))
       (if (.isDone fut)
         (do
           (.lock handler)
@@ -131,8 +129,8 @@
             (impl/commit handler))
           (.unlock handler)
           (box
-           (if (instance? Exception val)
-             (.completeExceptionally fut ^Exception val)
+           (if (instance? Throwable val)
+             (.completeExceptionally fut ^Throwable val)
              (.complete fut val)))))))
 
   impl/Channel
@@ -163,7 +161,7 @@
                              (let [~@(mapcat (fn [[l sym]] [sym `(^:once fn* [] ~(vary-meta l dissoc :tag))]) crossing-env)
                                    f# ~(ioc/state-machine `(try
                                                              ~@body
-                                                             (catch Exception ~'e
+                                                             (catch Throwable ~'e
                                                                (unwrap-exception ~'e))) 1 [crossing-env &env] ioc/async-custom-terminators)
                                    state# (-> (f#)
                                               (ioc/aset-all! ioc/USER-START-IDX c#
@@ -206,15 +204,51 @@
   the for can contain `<!` and `!<!` calls. This is implicitly wrapped in
   an `async` block."
   [bindings & body]
-  `(async
-    (loop [[~'outf & ~'more] (doall
-                              (for [~@bindings]
-                                (async
-                                 ~@body)))
-           ~'outv []]
-      (if (nil? ~'outf)
-        ~'outv
-        (recur ~'more (conj ~'outv (!<! ~'outf)))))))
+  (let [pairs (partition 2 bindings)
+        bvars (loop [[pair & more] pairs
+                     vars []]
+                (if (nil? pair)
+                  vars
+                  (let [[pk pv] pair
+                        [vars pairs]
+                        (if (= pk :let)
+                          [vars
+                           (concat more (partition 2 pv))]
+                          [(reduce
+                            (fn flatten-reducer
+                              [vs v]
+                              (cond
+                                (symbol? v)
+                                (conj vs v)
+
+                                (coll? v)
+                                (into vs (reduce flatten-reducer [] v))
+
+                                :else
+                                vs))
+                            vars
+                            [pk])
+                           more])]
+                    (recur pairs vars))))]
+    `(async
+      (let [results#
+            (loop [[vars# & more#] (doall
+                                    (for [~@bindings]
+                                      [~@bvars]))
+                   outv# []]
+              (if (nil? vars#)
+                outv#
+                (let [[~@bvars] vars#
+                      out# (do ~@body)]
+                  (recur more# (conj outv# out#)))))]
+        (if (some async? results#)
+          (loop [[item# & more#] results#
+                 output# []]
+            (let [output# (conj output# (!<! item#))]
+              (if (nil? more#)
+                output#
+                (recur more# output#))))
+          results#)))))
 
 (defn async-map
   "Asynchronously returns the result of applying f to
@@ -230,27 +264,42 @@
      [params param-seq]
      (apply f params))))
 
-(defn async-some
-  "Asynchronously returns the first logical true value of calling pred for any x in coll,
-  else nil.  One common idiom is to use a set as pred, for example
-  this will return :fred if :fred is in the sequence, otherwise nil:
-  `(some #{:fred} coll)`"
-  [pred coll]
-  (async
-   (loop [coll coll]
-     (if-let [res (!<! (pred (first coll)))]
-       res
-       (when-let [more (next coll)]
-         (recur more))))))
+(defmacro async->
+  "Threads the expr through the forms which can return async result.
+  Inserts v as the second item in the first form, making a list of it
+  if it is not a list already. If there are more forms, inserts the
+  first form as the second item in second form, etc."
+  [v & call-seq]
+  (let [call-parsed-seq (for [call call-seq]
+                          (if (list? call)
+                            (vec call)
+                            (vector call)))]
+    `(async
+      (loop [v# ~v
+             [call# & more#] [~@call-parsed-seq]]
+        (if-not call#
+          v#
+          (let [arg# (!<! v#)
+                [f# & args#] call#
+                res# (!<! (apply f# arg# args#))]
+            (recur res# more#)))))))
 
-(defn async-every?
-  "Returns true if `(pred x)` is logical true for every x in coll, else false."
-  [pred coll]
-  (async
-   (loop [coll coll]
-     (if
-      (nil? (seq coll)) true
-      (let [res (!<! (pred (first coll)))]
-        (if-not res
-          false
-          (recur (next coll))))))))
+(defmacro async->>
+  "Threads the expr through the forms which can return async result.
+  Inserts x as the last item in the first form, making a list of it
+  if it is not a list already. If there are more forms, inserts the
+  first form as the last item in second form, etc."
+  [v & call-seq]
+  (let [call-parsed-seq (for [call call-seq]
+                          (if (list? call)
+                            (vec call)
+                            (vector call)))]
+    `(async
+      (loop [v# ~v
+             [call# & more#] [~@call-parsed-seq]]
+        (if-not call#
+          v#
+          (let [arg# (!<! v#)
+                [f# & args#] call#
+                r# (!<! (apply f# (concat args# [arg#])))]
+            (recur r# more#)))))))

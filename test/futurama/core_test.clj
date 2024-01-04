@@ -1,7 +1,7 @@
 (ns futurama.core-test
   (:require [clojure.test :refer [deftest testing is]]
             [futurama.core :refer [!<!! !<! async async-for async-map
-                                   async-some async-every?
+                                   async-> async->>
                                    async? completable-future]]
             [clojure.core.async :refer [go timeout put! take! <! >! <!!] :as a]
             [criterium.core :refer [report-result
@@ -13,45 +13,66 @@
 (def ^:dynamic *test-val1* nil)
 (def test-val2 nil)
 
-(deftest async-some-test
-  (testing "works the same way as a some fn"
-    (let [state1 (atom 0)
-          take-fn1 #(swap! state1 inc)
-          state2 (atom 0)
-          take-fn2 #(swap! state2 inc)
-          list1 (repeatedly take-fn1)
-          list2 (repeatedly take-fn2)]
-      (is (= 10
-             (some #{10} list1)
-             @state1))
-      (is (= 10
-             (!<!! (async-some #(async (#{10} %)) list2))
-             @state2)))))
+(defmacro wrap-async
+  [f & args]
+  `(fn ~(symbol (str "async" (name f)))
+     [& ~'argv]
+     (async
+       (apply ~f ~@args ~'argv))))
 
-(deftest async-every-test
-  (testing "works the same way as a every? fn"
-    (let [state1 (atom 0)
-          take-fn1 #(swap! state1 inc)
-          state2 (atom 0)
-          take-fn2 #(swap! state2 inc)
-          list1 (repeatedly take-fn1)
-          list2 (repeatedly take-fn2)]
-      (is (false? (every? #(< % 10) list1)))
-      (is (= 10
-             @state1))
-      (is (false? (!<!! (async-every? #(async (< % 10)) list2))))
-      (is (= 10
-             @state2)))))
+(defn plus-a-times-b
+  [a b]
+  (* (+ a 100) b))
+
+(deftest thread-first-macro-tests
+  (testing "can thread first async->"
+    (is (= 1500
+           (-> 10
+               (+ 10)
+               (* 5)
+               (+ 100)
+               (plus-a-times-b 5))
+           (<!!
+             (async-> 10
+                      ((wrap-async +) 10)
+                      ((wrap-async *) 5)
+                      ((wrap-async +) 100)
+                      ((wrap-async plus-a-times-b) 5)))))))
+
+(deftest thread-last-macro-tests
+  (testing "can thread first async->>"
+    (is (= 21000
+           (->> 10
+                (+ 10)
+                (* 5)
+                (+ 100)
+                (plus-a-times-b 5))
+           (<!!
+             (async->> 10
+                       ((wrap-async +) 10)
+                       ((wrap-async *) 5)
+                       ((wrap-async +) 100)
+                       ((wrap-async plus-a-times-b) 5)))))))
 
 (deftest async-map-test
   (testing "works the same way as a map fn with multiple colls"
-    (let [args (repeat 10 (range 10))]
+    (let [async-handler #(async (apply + %&))
+          args (repeat 10 (range 10))]
       (is (= [0 10 20 30 40 50 60 70 80 90]
              (apply map + args)
-             (!<!! (apply async-map #(async (apply + %&)) args)))))))
+             (!<!! (apply async-map async-handler args))))))
+  (testing "can loop map concurrently, performance test"
+    (let [bench (with-progress-reporting
+                  (quick-benchmark
+                    (is (= (range 1 11)
+                           (<!! (async-map #(async (!<! (timeout 50)) (inc %)) (range 10)))))
+                    {:verbose true}))
+          [mean [lower upper]] (:mean bench)]
+      (report-result bench)
+      (is (<= 0.05 lower mean upper 0.07)))))
 
 (deftest async-for-test
-  (testing "can loop for using async ops"
+  (testing "can loop for using async ops, sequential !<! test"
     (is (= [[1 1 2 4] [1 3 4 8] [3 1 4 8] [3 3 6 12]]
            (<!!
              (async-for [a (range 4)
@@ -64,12 +85,14 @@
     (let [bench (with-progress-reporting
                   (quick-benchmark
                     (<!!
-                      (async-for [a (range 4)
-                                  b (range 4)
-                                  :let [c (+ a b)]
-                                  :when (and (odd? a) (odd? b))]
-                                 (!<! (timeout 50))
-                                 [a b c (+ a b c)]))
+                      (async-for
+                        [a (range 4)
+                         b (range 4)
+                         :let [c (+ a b)]
+                         :when (and (odd? a) (odd? b))]
+                        (async
+                          (!<! (timeout 50))
+                          [a b c (+ a b c)])))
                     {:verbose true}))
           [mean [lower upper]] (:mean bench)]
       (report-result bench)

@@ -31,8 +31,6 @@
   impl/WritePort
   (put! [d val handler]
     (let [^Lock handler handler]
-      (when (nil? val)
-        (throw (IllegalArgumentException. "Can't put nil on channel")))
       (if (d/realized? d)
         (do
           (.lock handler)
@@ -46,7 +44,7 @@
             (impl/commit handler))
           (.unlock handler)
           (box
-           (if (instance? Exception val)
+           (if (instance? Throwable val)
              (d/error! d val)
              (d/success! d val)))))))
 

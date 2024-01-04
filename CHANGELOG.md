@@ -1,5 +1,12 @@
 This is a history of changes to k13labs/futurama
 
+# 0.3.6
+* Refactored `async-for` so it uses less async macros and it is more flexible
+* Refactored `async-map` so it leverages `async-for` behind the scenes.
+* Removed `async-some` and `async-every?` and instead added some new helpers.
+* Added `async->` and `async->>` threading macros to make it easier to thread async.
+* Replaced matching on Exception to Throwable to avoid leaving hanging promises due to errors.
+
 # 0.3.5
 * Add more async collection fns: `async-map`, `async-some`, `async-every?`
 

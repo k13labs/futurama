@@ -1,1 +1,3 @@
-{:lint-as {futurama.core/async-for clojure.core/for}}
+{:lint-as {futurama.core/async-for clojure.core/for
+           futurama.core/async-> clojure.core/->
+           futurama.core/async->> clojure.core/->>}}

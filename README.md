@@ -29,9 +29,20 @@ Here's a simple example.
      b (range 4)
      :let [c (+ a b)]
      :when (and (odd? a) (odd? b))]
-    (!<! (timeout 50)) ;;; can use !<! inside `async-for` comprehension
+    (!<! (timeout 50)) ;;; can use !<! inside `async-for` comprehension so the items are evaluated sequentially
     [a b c (+ a b c)]))
-;;; => returns `[[1 1 2 4] [1 3 4 8] [3 1 4 8] [3 3 6 12]]` and takes slightly over 50ms total time.
+;;; => returns `[[1 1 2 4] [1 3 4 8] [3 1 4 8] [3 3 6 12]]` and takes slightly over 500ms total time.
+
+(!<!!
+  (async-for
+    [a (range 4)
+     b (range 4)
+     :let [c (+ a b)]
+     :when (and (odd? a) (odd? b))]
+    (async
+      (!<! (timeout 50)) ;;; here we use !<! inside an async block so we iterate faster through the items
+      [a b c (+ a b c)])))
+;;; => returns `[[1 1 2 4] [1 3 4 8] [3 1 4 8] [3 3 6 12]]` evaluated fully async and takes slightly over 50ms total time.
 ```
 
 See the existing tests for more examples.
