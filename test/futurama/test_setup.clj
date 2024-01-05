@@ -7,6 +7,7 @@
 
 (hto/activate!)
 
+#_{:clj-kondo/ignore [:clojure-lsp/unused-public-var]}
 (defn defuse-zero-assertions
   "Don't fail the test suite if we hide an `is` within a `doseq`.
 

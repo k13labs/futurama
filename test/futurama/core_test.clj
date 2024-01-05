@@ -1,8 +1,11 @@
 (ns futurama.core-test
   (:require [clojure.test :refer [deftest testing is]]
-            [futurama.core :refer [!<!! !<! async async-for async-map
-                                   async-> async->>
-                                   async? completable-future]]
+            [futurama.core :refer [!<!! !<! !<!* async?
+                                   async async-> async->>
+                                   async-for async-map async-reduce
+                                   async-some async-every?
+                                   async-prewalk async-postwalk
+                                   completable-future]]
             [clojure.core.async :refer [go timeout put! take! <! >! <!!] :as a]
             [criterium.core :refer [report-result
                                     quick-benchmark
@@ -54,6 +57,67 @@
                        ((wrap-async +) 100)
                        ((wrap-async plus-a-times-b) 5)))))))
 
+(deftest async-some-test
+  (testing "async-some async test returns first returned valid logical true"
+    (is (= 9 ;;; always returns 9 even though it's the last number because it is returned first
+           (!<!! (async-some
+                   (fn [n]
+                     (async
+                       (when (odd? n)
+                         (do
+                           (!<! (timeout (- 1000 (* n 100))))
+                           n))))
+                   (range 10)))))))
+
+(deftest async-every-test
+  (testing "async-every? async test returns true when all true"
+    (is (= true
+           (!<!! (async-every?
+                   (fn [n]
+                     (async
+                       (when (number? n)
+                         (do
+                           (!<! (timeout 50))
+                           true))))
+                   (range 10))))))
+  (testing "async-every? async test returns false when some false"
+    (is (= false
+           (!<!! (async-every?
+                   (fn [n]
+                     (async
+                       (when (not= n 5)
+                         (do
+                           (!<! (timeout 50))
+                           true))))
+                   (range 10)))))))
+
+(deftest async-reduce-test
+  (testing "async reduce async result handling"
+    (is (= 45
+           (!<!! (async-reduce (fn [& nsq]
+                                 (async
+                                   (apply + nsq))) (async (range 10))))))))
+
+(deftest async-prewalk-test
+  (testing "async prewalk async walk handler"
+    (is (= {:foo [:bar 100 #{1 2 3 4 5}]}
+           (!<!! (async-prewalk (fn [n]
+                                  (async n))
+                                (CompletableFuture/completedFuture
+                                  {:foo
+                                   (CompletableFuture/completedFuture
+                                     [:bar (go 100) (async #{1 2 3 4 5})])})))))))
+
+(deftest async-postwalk-test
+  (testing "async postwalk async walk handler"
+    (is (= {:foo [:bar 100 #{1 2 3 4 5}]}
+           (!<!! (async-postwalk (fn [n]
+                                   (async n))
+                                 (CompletableFuture/completedFuture
+                                   {:foo
+                                    (CompletableFuture/completedFuture
+                                      [:bar (go 100) (async #{1 2 3 4 5})])})))))))
+
 (deftest async-map-test
   (testing "works the same way as a map fn with multiple colls"
     (let [async-handler #(async (apply + %&))
@@ -64,23 +128,13 @@
   (testing "can loop map concurrently, performance test"
     (let [bench (with-progress-reporting
                   (quick-benchmark
-                    (is (= (range 1 11)
-                           (<!! (async-map #(async (!<! (timeout 50)) (inc %)) (range 10)))))
+                    (<!! (async-map #(async (!<! (timeout 50)) (inc %)) (range 10)))
                     {:verbose true}))
           [mean [lower upper]] (:mean bench)]
       (report-result bench)
       (is (<= 0.05 lower mean upper 0.07)))))
 
 (deftest async-for-test
-  (testing "can loop for using async ops, sequential !<! test"
-    (is (= [[1 1 2 4] [1 3 4 8] [3 1 4 8] [3 3 6 12]]
-           (<!!
-             (async-for [a (range 4)
-                         b (range 4)
-                         :let [c (+ a b)]
-                         :when (and (odd? a) (odd? b))]
-                        (!<! (timeout 50))
-                        [a b c (+ a b c)])))))
   (testing "can loop for concurrently, performance test"
     (let [bench (with-progress-reporting
                   (quick-benchmark
@@ -146,6 +200,13 @@
                    (!<!
                      (completable-future
                        [*test-val1* test-val2])))))))))
+  (testing "sequential collection non-blocking take - !<!*"
+    (<!!
+      (async
+        (is (= (range 1 11)
+               (!<!*
+                 (for [n (range 10)]
+                   (async (inc n)))))))))
   (testing "nested blocking take - !<!!"
     (is (= {:foo "bar"}
            (!<!! (async

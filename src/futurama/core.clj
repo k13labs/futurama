@@ -1,8 +1,10 @@
 (ns futurama.core
-  (:require [clojure.core.async :refer [<! <!! take!]]
+  (:require [clojure.core.async :refer [<! <!! put! take! close!] :as async]
             [clojure.core.async.impl.protocols :as impl]
             [clojure.core.async.impl.channels :refer [box]]
             [clojure.core.async.impl.ioc-macros :as ioc]
+            [clojure.core.reducers :as r]
+            [futurama.util :as u]
             [futurama.deferred])
   (:import [clojure.lang Var]
            [java.util.concurrent
@@ -19,13 +21,13 @@
 
 (defn dispatch
   "dispatch the function by submitting it to the `*thread-pool*`"
-  [^Runnable f]
+  ^Future [^Runnable f]
   (let [^ExecutorService pool (or *thread-pool* (ForkJoinPool/commonPool))]
     (.submit ^ExecutorService pool ^Runnable f)))
 
 (defn unwrap-exception
   "unwraps an ExecutionException or CompletionException via ex-cause until the root exception is returned"
-  [^Throwable ex]
+  ^Throwable [^Throwable ex]
   (if-let [ce (and (or (instance? ExecutionException ex)
                        (instance? CompletionException ex))
                    (ex-cause ex))]
@@ -41,8 +43,8 @@
 
 (defn async?
   "returns true if v satisfies? core.async's `ReadPort`"
-  [v]
-  (satisfies? impl/ReadPort v))
+  ^Boolean [v]
+  (u/satisfies? impl/ReadPort v))
 
 (defmacro completable-future
   "Asynchronously invokes the body inside a completable future, preserves the current thread binding frame,
@@ -82,11 +84,11 @@
                       (.getNow fut nil)
                       (catch Throwable e
                         (unwrap-exception e)))]
-            (if (satisfies? impl/ReadPort val)
+            (if (u/satisfies? impl/ReadPort val)
               (do
                 (take! val (fn do-read
                              [val]
-                             (if (satisfies? impl/ReadPort val)
+                             (if (u/satisfies? impl/ReadPort val)
                                (take! val do-read)
                                (cb val))))
                 nil)
@@ -96,10 +98,10 @@
                            ^BiConsumer (reify BiConsumer
                                          (accept [_ val ex]
                                            (cond
-                                             (satisfies? impl/ReadPort val)
+                                             (u/satisfies? impl/ReadPort val)
                                              (take! val (fn do-read
                                                           [val]
-                                                          (if (satisfies? impl/ReadPort val)
+                                                          (if (u/satisfies? impl/ReadPort val)
                                                             (take! val do-read)
                                                             (cb val))))
 
@@ -139,6 +141,38 @@
   (closed? [fut]
     (.isDone ^CompletableFuture fut)))
 
+(defmacro async!
+  "Asynchronously executes the body, returning `port` immediately to the
+  calling thread. Additionally, any visible calls to !<!, <!, >! and alt!/alts!
+  channel operations within the body will block (if necessary) by
+  'parking' the calling thread rather than tying up an OS thread.
+  Upon completion of the operation, the body will be resumed.
+
+  The success or failure output will be put! in `port`.
+
+  async blocks should not (either directly or indirectly) perform operations
+  that may block indefinitely. Doing so risks depleting the fixed pool of
+  go block threads, causing all go block processing to stop. This includes
+  core.async blocking ops (those ending in !!) and other blocking IO.
+
+  Returns a channel which will receive the result of the body when
+  completed; the pool used can be specified via `*thread-pool*` binding."
+  [port & body]
+  (let [crossing-env (zipmap (keys &env) (repeatedly gensym))]
+    `(let [c# ~port
+           captured-bindings# (Var/getThreadBindingFrame)]
+       (dispatch (^:once fn* []
+                             (let [~@(mapcat (fn [[l sym]] [sym `(^:once fn* [] ~(vary-meta l dissoc :tag))]) crossing-env)
+                                   f# ~(ioc/state-machine `(try
+                                                             ~@body
+                                                             (catch Throwable ~'e
+                                                               (unwrap-exception ~'e))) 1 [crossing-env &env] ioc/async-custom-terminators)
+                                   state# (-> (f#)
+                                              (ioc/aset-all! ioc/USER-START-IDX c#
+                                                             ioc/BINDINGS-IDX captured-bindings#))]
+                               (ioc/run-state-machine-wrapped state#))))
+       c#)))
+
 (defmacro async
   "Asynchronously executes the body, returning immediately to the
   calling thread. Additionally, any visible calls to !<!, <!, >! and alt!/alts!
@@ -154,20 +188,9 @@
   Returns a channel which will receive the result of the body when
   completed; the pool used can be specified via `*thread-pool*` binding."
   [& body]
-  (let [crossing-env (zipmap (keys &env) (repeatedly gensym))]
-    `(let [c# (CompletableFuture.)
-           captured-bindings# (Var/getThreadBindingFrame)]
-       (dispatch (^:once fn* []
-                             (let [~@(mapcat (fn [[l sym]] [sym `(^:once fn* [] ~(vary-meta l dissoc :tag))]) crossing-env)
-                                   f# ~(ioc/state-machine `(try
-                                                             ~@body
-                                                             (catch Throwable ~'e
-                                                               (unwrap-exception ~'e))) 1 [crossing-env &env] ioc/async-custom-terminators)
-                                   state# (-> (f#)
-                                              (ioc/aset-all! ioc/USER-START-IDX c#
-                                                             ioc/BINDINGS-IDX captured-bindings#))]
-                               (ioc/run-state-machine-wrapped state#))))
-       c#)))
+  `(async!
+    (CompletableFuture.)
+    ~@body))
 
 (defmacro !<!
   "An improved macro version of <!, which also rethrows exceptions returned over the channel.
@@ -179,9 +202,18 @@
   [v]
   `(rethrow-exception
     (let [~'r ~v]
-      (if (satisfies? impl/ReadPort ~'r)
+      (if (u/satisfies? impl/ReadPort ~'r)
         (<! ~'r)
         ~'r))))
+
+(defmacro !<!*
+  "Like !<! but works with collections of async values"
+  [coll]
+  `(loop [~'icoll (not-empty ~coll)
+          ~'ocoll []]
+     (if (nil? ~'icoll)
+       ~'ocoll
+       (recur (next ~'icoll) (conj ~'ocoll (!<! (first ~'icoll)))))))
 
 (defmacro !<!!
   "An improved macro version of <!!, which also rethrows exceptions returned over the channel.
@@ -193,7 +225,7 @@
   [v]
   `(rethrow-exception
     (let [~'r ~v]
-      (if (satisfies? impl/ReadPort ~'r)
+      (if (u/satisfies? impl/ReadPort ~'r)
         (<!! ~'r)
         ~'r))))
 
@@ -208,7 +240,7 @@
         bvars (loop [[pair & more] pairs
                      vars []]
                 (if (nil? pair)
-                  vars
+                  (vec (set vars))
                   (let [[pk pv] pair
                         [vars pairs]
                         (if (= pk :let)
@@ -231,24 +263,18 @@
                            more])]
                     (recur pairs vars))))]
     `(async
-      (let [results#
-            (loop [[vars# & more#] (doall
-                                    (for [~@bindings]
-                                      [~@bvars]))
-                   outv# []]
-              (if (nil? vars#)
-                outv#
-                (let [[~@bvars] vars#
-                      out# (do ~@body)]
-                  (recur more# (conj outv# out#)))))]
-        (if (some async? results#)
-          (loop [[item# & more#] results#
-                 output# []]
-            (let [output# (conj output# (!<! item#))]
-              (if (nil? more#)
-                output#
-                (recur more# output#))))
-          results#)))))
+      (let [args# (for [~@bindings]
+                    [~@bvars])
+            output#
+            (loop [results# []
+                   args# (seq args#)]
+              (if (nil? args#)
+                results#
+                (recur (conj results#
+                             (let [[~@bvars] (first args#)]
+                               ~@body))
+                       (next args#))))]
+        (!<!* output#)))))
 
 (defn async-map
   "Asynchronously returns the result of applying f to
@@ -256,13 +282,94 @@
   set of second items in each coll, until any one of the colls is
   exhausted.  Any remaining items in other colls are ignored. Function
   f should accept number-of-colls arguments."
-  [f coll & coll-seq]
-  (let [colls (cons coll coll-seq)
-        param-seq (->> (apply interleave colls)
-                       (partition (count colls)))]
-    (async-for
-     [params param-seq]
-     (apply f params))))
+  ^CompletableFuture [f coll & coll-seq]
+  (async-for
+   [params (let [colls (!<!* (cons coll coll-seq))]
+             (->> (apply interleave colls)
+                  (partition (count colls))))]
+   (apply f params)))
+
+(defn- async-do-reduce*
+  "internal reducer function to work with async args"
+  ^CompletableFuture [f v x]
+  (async
+   (f (!<! v) (!<! x))))
+
+(defn async-reduce
+  "Like core/reduce except, when init is not provided, (f) is used, and async results are read with !<!."
+  (^CompletableFuture [f coll]
+   (async-reduce f (f) coll))
+  (^CompletableFuture [f init coll]
+   (async
+    (r/reduce (partial async-do-reduce* f)
+              (!<! init)
+              (!<! coll)))))
+
+(defn- async-some-call*
+  "internal async-some fn handler to handle async args and result"
+  [^CompletableFuture result pred item]
+  (async
+   (when-let [value (!<! (pred (!<! item)))]
+     (put! result value))))
+
+(defn async-some
+  "Concurrently executes (pred x) and returns the first returned
+  logical true value of (pred x) for any x in coll, else nil.
+  One common idiom is to use a set as pred, for example
+  this will return :fred if :fred is in the sequence, otherwise nil:
+  (some #{:fred} coll). Please beware that unlike `clojure.core/some`
+  this function returns the first asynchronous result that completes
+  and evaluates to logical true, but not necessarily the first one
+  in sequential order."
+  ^CompletableFuture [pred coll]
+  (let [^CompletableFuture result (CompletableFuture.)]
+    (async!
+     result
+     (let [results (doall
+                    (for [item (!<! coll)]
+                      (async-some-call* result pred item)))]
+       (loop [results (seq results)]
+         (cond
+           (impl/closed? result)
+           nil
+
+           (nil? results)
+           (close! result)
+
+           :else
+           (do
+             (!<! (first results))
+             (recur (next results)))))))
+    result))
+
+(defn- async-every-call*
+  "internal async-every? fn handler to handle async args and result"
+  ^CompletableFuture [^CompletableFuture result pred item]
+  (async
+   (when-not (!<! (pred (!<! item)))
+     (put! result false))))
+
+(defn async-every?
+  "Returns true if (pred x) is logical true for every x in coll, else false."
+  ^CompletableFuture [pred coll]
+  (let [^CompletableFuture result (CompletableFuture.)]
+    (async!
+     result
+     (let [results (for [item coll]
+                     (async-every-call* result pred item))]
+       (loop [results (seq results)]
+         (cond
+           (impl/closed? result)
+           nil
+
+           (nil? results)
+           (put! result true)
+
+           :else
+           (do
+             (!<! (first results))
+             (recur (next results)))))))
+    result))
 
 (defmacro async->
   "Threads the expr through the forms which can return async result.
@@ -303,3 +410,50 @@
                 [f# & args#] call#
                 r# (!<! (apply f# (concat args# [arg#])))]
             (recur r# more#)))))))
+
+(defn- async-walk-record*
+  "internal async walk adapter to walk a record"
+  ^CompletableFuture [innerf r x]
+  (async
+   (conj (!<! r) (!<! (innerf (!<! x))))))
+
+(defn async-walk
+  "Traverses form, an arbitrary data structure.  inner and outer are
+  functions.  Applies inner to each element of form, building up a
+  data structure of the same type, then applies outer to the result.
+  Recognizes all Clojure data structures. Consumes seqs as with doall."
+  ^CompletableFuture [inner outer form]
+  (async
+   (let [form (!<! form)]
+     (cond
+       (list? form)
+       (!<! (outer (apply list (!<! (async-map inner form)))))
+
+       (instance? clojure.lang.IMapEntry form)
+       (outer (clojure.lang.MapEntry/create (!<! (inner (!<! (key form))))
+                                            (!<! (inner (!<! (val form))))))
+
+       (seq? form)
+       (outer (!<! (async-map inner form)))
+
+       (instance? clojure.lang.IRecord form)
+       (outer (!<! (reduce (partial async-walk-record* inner)
+                           form form)))
+
+       (coll? form)
+       (outer (into (empty form) (!<! (async-map inner form))))
+
+       :else
+       (outer form)))))
+
+(defn async-postwalk
+  "Performs a depth-first, post-order traversal of form.  Calls f on
+  each sub-form, uses f's return value in place of the original.
+  Recognizes all Clojure data structures. Consumes seqs as with doall."
+  ^CompletableFuture [f form]
+  (async-walk (partial async-postwalk f) f form))
+
+(defn async-prewalk
+  "Like postwalk, but does pre-order traversal."
+  ^CompletableFuture [f form]
+  (async-walk (partial async-prewalk f) identity (f form)))
