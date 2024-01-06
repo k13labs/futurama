@@ -2,6 +2,7 @@
   (:require [clojure.core.async :refer [take!]]
             [clojure.core.async.impl.protocols :as impl]
             [clojure.core.async.impl.channels :refer [box]]
+            [futurama.util :as u]
             [manifold.deferred :as d])
   (:import [java.util.concurrent.locks Lock]
            [manifold.deferred IDeferred]))
@@ -18,10 +19,10 @@
       (when-let [cb (commit-handler)]
         (d/on-realized d
                        (fn [val]
-                         (if (satisfies? impl/ReadPort val)
+                         (if (u/instance-satisfies? impl/ReadPort val)
                            (take! val (fn do-read
                                         [val]
-                                        (if (satisfies? impl/ReadPort val)
+                                        (if (u/instance-satisfies? impl/ReadPort val)
                                           (take! val do-read)
                                           (cb val))))
                            (cb val)))

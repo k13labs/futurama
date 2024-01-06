@@ -43,9 +43,9 @@
     v))
 
 (defn async?
-  "returns true if v satisfies? core.async's `ReadPort`"
+  "returns true if v instance-satisfies? core.async's `ReadPort`"
   ^Boolean [v]
-  (u/satisfies? impl/ReadPort v))
+  (u/instance-satisfies? impl/ReadPort v))
 
 (defmacro completable-future
   "Asynchronously invokes the body inside a completable future, preserves the current thread binding frame,
@@ -86,11 +86,11 @@
                       (.get ^Future fut)
                       (catch Throwable e
                         (unwrap-exception e)))]
-            (if (u/satisfies? impl/ReadPort val)
+            (if (u/instance-satisfies? impl/ReadPort val)
               (do
                 (take! val (fn do-read
                              [val]
-                             (if (u/satisfies? impl/ReadPort val)
+                             (if (u/instance-satisfies? impl/ReadPort val)
                                (take! val do-read)
                                (cb val))))
                 nil)
@@ -105,10 +105,10 @@
                       (catch Throwable e
                         [nil e]))]
                 (cond
-                  (u/satisfies? impl/ReadPort val)
+                  (u/instance-satisfies? impl/ReadPort val)
                   (take! val (fn do-read
                                [val]
-                               (if (u/satisfies? impl/ReadPort val)
+                               (if (u/instance-satisfies? impl/ReadPort val)
                                  (take! val do-read)
                                  (cb val))))
 
@@ -146,11 +146,11 @@
                       (deref ref)
                       (catch Throwable e
                         (unwrap-exception e)))]
-            (if (u/satisfies? impl/ReadPort val)
+            (if (u/instance-satisfies? impl/ReadPort val)
               (do
                 (take! val (fn do-read
                              [val]
-                             (if (u/satisfies? impl/ReadPort val)
+                             (if (u/instance-satisfies? impl/ReadPort val)
                                (take! val do-read)
                                (cb val))))
                 nil)
@@ -165,10 +165,10 @@
                       (catch Throwable e
                         [nil e]))]
                 (cond
-                  (u/satisfies? impl/ReadPort val)
+                  (u/instance-satisfies? impl/ReadPort val)
                   (take! val (fn do-read
                                [val]
-                               (if (u/satisfies? impl/ReadPort val)
+                               (if (u/instance-satisfies? impl/ReadPort val)
                                  (take! val do-read)
                                  (cb val))))
 
@@ -205,11 +205,11 @@
                       (.getNow fut nil)
                       (catch Throwable e
                         (unwrap-exception e)))]
-            (if (u/satisfies? impl/ReadPort val)
+            (if (u/instance-satisfies? impl/ReadPort val)
               (do
                 (take! val (fn do-read
                              [val]
-                             (if (u/satisfies? impl/ReadPort val)
+                             (if (u/instance-satisfies? impl/ReadPort val)
                                (take! val do-read)
                                (cb val))))
                 nil)
@@ -219,10 +219,10 @@
                            ^BiConsumer (reify BiConsumer
                                          (accept [_ val ex]
                                            (cond
-                                             (u/satisfies? impl/ReadPort val)
+                                             (u/instance-satisfies? impl/ReadPort val)
                                              (take! val (fn do-read
                                                           [val]
-                                                          (if (u/satisfies? impl/ReadPort val)
+                                                          (if (u/instance-satisfies? impl/ReadPort val)
                                                             (take! val do-read)
                                                             (cb val))))
 
@@ -323,7 +323,7 @@
   [v]
   `(rethrow-exception
     (let [~'r ~v]
-      (if (u/satisfies? impl/ReadPort ~'r)
+      (if (u/instance-satisfies? impl/ReadPort ~'r)
         (<! ~'r)
         ~'r))))
 
@@ -346,7 +346,7 @@
   [v]
   `(rethrow-exception
     (let [~'r ~v]
-      (if (u/satisfies? impl/ReadPort ~'r)
+      (if (u/instance-satisfies? impl/ReadPort ~'r)
         (<!! ~'r)
         ~'r))))
 

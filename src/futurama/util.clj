@@ -26,11 +26,11 @@
   (when (instance? (:on-interface protocol) x)
     x))
 
-(defn find-protocol-impl
-  [protocol x]
-  (or (find-protocol-impl-from-object protocol x)
-      (find-protocol-impl-from-class protocol (class x))))
+(defn class-satisfies?
+  [protocol ^Class c]
+  (boolean (find-protocol-impl-from-class protocol c)))
 
-(defn satisfies?
+(defn instance-satisfies?
   [protocol x]
-  (boolean (find-protocol-impl protocol x)))
+  (or (boolean (find-protocol-impl-from-object protocol x))
+      (class-satisfies? protocol (class x))))
