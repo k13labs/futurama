@@ -1,12 +1,12 @@
 (ns futurama.core
-  (:require [clojure.core.async :refer [<! <!! put! take! close!] :as async]
+  (:require [clojure.core.async :refer [<! <!! put! take! close! thread] :as async]
             [clojure.core.async.impl.protocols :as impl]
             [clojure.core.async.impl.channels :refer [box]]
             [clojure.core.async.impl.ioc-macros :as ioc]
             [clojure.core.reducers :as r]
             [futurama.util :as u]
             [futurama.deferred])
-  (:import [clojure.lang Var]
+  (:import [clojure.lang Var IDeref IFn]
            [java.util.concurrent
             CompletableFuture
             CompletionException
@@ -29,7 +29,8 @@
   "unwraps an ExecutionException or CompletionException via ex-cause until the root exception is returned"
   ^Throwable [^Throwable ex]
   (if-let [ce (and (or (instance? ExecutionException ex)
-                       (instance? CompletionException ex))
+                       (instance? CompletionException ex)
+                       (instance? InterruptedException ex))
                    (ex-cause ex))]
     ce
     ex))
@@ -67,6 +68,126 @@
      ;;; then cancel the Future which is currently doing the work
      (.exceptionally res-fut# cancel#)
      res-fut#))
+
+(extend-type Future
+  impl/ReadPort
+  (take! [fut handler]
+    (let [^Future fut fut
+          ^Lock handler handler
+          commit-handler (fn do-commit []
+                           (.lock handler)
+                           (let [take-cb (and (impl/active? handler) (impl/commit handler))]
+                             (.unlock handler)
+                             take-cb))]
+      (when-let [cb (commit-handler)]
+        (cond
+          (realized? fut)
+          (let [val (try
+                      (.get ^Future fut)
+                      (catch Throwable e
+                        (unwrap-exception e)))]
+            (if (u/satisfies? impl/ReadPort val)
+              (do
+                (take! val (fn do-read
+                             [val]
+                             (if (u/satisfies? impl/ReadPort val)
+                               (take! val do-read)
+                               (cb val))))
+                nil)
+              (box val)))
+
+          :else
+          (do
+            (thread
+              (let [[val ex]
+                    (try
+                      [(.get ^Future fut) nil]
+                      (catch Throwable e
+                        [nil e]))]
+                (cond
+                  (u/satisfies? impl/ReadPort val)
+                  (take! val (fn do-read
+                               [val]
+                               (if (u/satisfies? impl/ReadPort val)
+                                 (take! val do-read)
+                                 (cb val))))
+
+                  (some? val)
+                  (cb val)
+
+                  (some? ex)
+                  (cb ex)
+
+                  :else
+                  (cb nil))))
+            nil)))))
+
+  impl/Channel
+  (close! [fut]
+    (when-not (realized? fut)
+      (future-cancel ^Future fut)))
+  (closed? [fut]
+    (realized? ^Future fut)))
+
+(extend-type IDeref
+  impl/ReadPort
+  (take! [ref handler]
+    (let [^IDeref ref ref
+          ^Lock handler handler
+          commit-handler (fn do-commit []
+                           (.lock handler)
+                           (let [take-cb (and (impl/active? handler) (impl/commit handler))]
+                             (.unlock handler)
+                             take-cb))]
+      (when-let [cb (commit-handler)]
+        (cond
+          (realized? ref)
+          (let [val (try
+                      (deref ref)
+                      (catch Throwable e
+                        (unwrap-exception e)))]
+            (if (u/satisfies? impl/ReadPort val)
+              (do
+                (take! val (fn do-read
+                             [val]
+                             (if (u/satisfies? impl/ReadPort val)
+                               (take! val do-read)
+                               (cb val))))
+                nil)
+              (box val)))
+
+          :else
+          (do
+            (thread
+              (let [[val ex]
+                    (try
+                      [(deref ref) nil]
+                      (catch Throwable e
+                        [nil e]))]
+                (cond
+                  (u/satisfies? impl/ReadPort val)
+                  (take! val (fn do-read
+                               [val]
+                               (if (u/satisfies? impl/ReadPort val)
+                                 (take! val do-read)
+                                 (cb val))))
+
+                  (some? val)
+                  (cb val)
+
+                  (some? ex)
+                  (cb ex)
+
+                  :else
+                  (cb nil))))
+            nil)))))
+
+  impl/Channel
+  (close! [ref]
+    (if (instance? IFn ref)
+      (ref nil)))
+  (closed? [ref]
+    (realized? ref)))
 
 (extend-type CompletableFuture
   impl/ReadPort

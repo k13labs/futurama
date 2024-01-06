@@ -1,5 +1,8 @@
 This is a history of changes to k13labs/futurama
 
+# 0.3.8-SNAPSHOT
+* Add support for `Future` and `IDeref`
+
 # 0.3.7
 * Add collection helpers for: `async-reduce`, `async-some`, `async-every?`, `async-walk/prewalk/postwalk`
 

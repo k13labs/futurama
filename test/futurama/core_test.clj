@@ -217,7 +217,11 @@
                            (<! (timeout 50))
                            (let [c (CompletableFuture.)]
                              (>! c {:foo "bar"})
-                             c))))))))))
+                             (delay
+                               (future
+                                 (let [p (promise)]
+                                   (deliver p c)
+                                   p)))))))))))))
   (testing "nested non-blocking take - !<!"
     (<!!
       (async
@@ -228,7 +232,12 @@
                           (completable-future
                             (go
                               (<! (timeout 50))
-                              (CompletableFuture/completedFuture {:foo "bar"})))))))))))))
+                              (delay
+                               (future
+                                 (let [p (promise)]
+                                   (deliver p
+                                            (CompletableFuture/completedFuture {:foo "bar"}))
+                                   p)))))))))))))))
 
 (deftest error-handling
   (testing "throws async exception on blocking deref - @"
