@@ -31,7 +31,7 @@ Here's a simple example.
      :when (and (odd? a) (odd? b))]
     (!<! (timeout 50)) ;;; can use !<! inside `async-for` comprehension so the items are evaluated sequentially
     [a b c (+ a b c)]))
-;;; => returns `[[1 1 2 4] [1 3 4 8] [3 1 4 8] [3 3 6 12]]` and takes slightly over 500ms total time.
+;;; => returns `[[1 1 2 4] [1 3 4 8] [3 1 4 8] [3 3 6 12]]` and takes slightly over 200ms total time.
 
 (!<!!
   (async-for

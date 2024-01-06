@@ -1,5 +1,8 @@
 This is a history of changes to k13labs/futurama
 
+# 0.3.7
+* Add collection helpers for: `async-reduce`, `async-some`, `async-every?`, `async-walk/prewalk/postwalk`
+
 # 0.3.6
 * Refactored `async-for` so it uses less async macros and it is more flexible
 * Refactored `async-map` so it leverages `async-for` behind the scenes.
