@@ -184,7 +184,7 @@
 
   impl/Channel
   (close! [ref]
-    (if (instance? IFn ref)
+    (when (instance? IFn ref)
       (ref nil)))
   (closed? [ref]
     (realized? ref)))
