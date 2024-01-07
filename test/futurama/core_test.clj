@@ -31,6 +31,34 @@
   (delay
     (Executors/newSingleThreadExecutor)))
 
+(deftest interruptible-completable-future-test
+  (testing "cancellable completable-future is interrupted test"
+    (let [a (promise)
+          s (atom 0)
+          f (completable-future
+              (while (not (Thread/interrupted)) ;;; this loop goes on infinitely until the thread is interrupted
+                (println "future looping..." (swap! s inc)))
+              (println "ended future looping.")
+              (deliver a true))]
+      (go
+        (<! (timeout 100))
+        (future-cancel f)) ;;; cancelling the completable future causes the backing thread to be interrupted
+      (is (true? @a))
+      (is (true? (.isCancelled f)))))
+  (testing "cancellable async block is interrupted test"
+    (let [a (promise)
+          s (atom 0)
+          f (async
+              (while (not (Thread/interrupted)) ;;; this loop goes on infinitely until the thread is interrupted
+                (println "async looping..." (swap! s inc)))
+              (println "ended async looping.")
+              (deliver a true))]
+      (go
+        (<! (timeout 100))
+        (future-cancel f)) ;;; cancelling the completable future causes the backing thread to be interrupted
+      (is (true? @a))
+      (is (true? (.isCancelled f))))))
+
 (deftest with-pool-macro-test
   (testing "with-pool evals body"
     (!<!!

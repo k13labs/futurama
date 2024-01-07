@@ -1,5 +1,10 @@
 This is a history of changes to k13labs/futurama
 
+# 0.4.0
+* Add `fixed-threadpool` method to create a FixedThreadPool
+* The default `*thread-pool*` is now a FixedThreadPool which can be interrupted.
+* Allow `async` to be interrupted just like `completable-future`, add tests.
+
 # 0.3.9
 * Add `with-pool` macro
 

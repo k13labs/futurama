@@ -12,12 +12,25 @@
             CompletionException
             ExecutionException
             ExecutorService
-            Future
-            ForkJoinPool]
+            Executors
+            Future]
            [java.util.concurrent.locks Lock]
            [java.util.function Function BiConsumer]))
 
-(def ^:dynamic *thread-pool* (ForkJoinPool/commonPool))
+(defn fixed-threadpool
+  "Creates a fixed-threadpool, by default uses the number of available processors."
+  ([]
+   (let [cpu-count (.. Runtime getRuntime availableProcessors)]
+     (fixed-threadpool cpu-count)))
+  ([n]
+   (Executors/newFixedThreadPool n)))
+
+(defonce
+  ^{:doc "Default ExecutorService used, corresponds with a FixedThreadPool as many threads as available processors."}
+  default-pool
+  (delay (fixed-threadpool)))
+
+(def ^:dynamic *thread-pool* nil)
 
 (defmacro with-pool
   "Utility macro which binds *thread-pool* to the supplied pool and then evaluates the `body`."
@@ -28,7 +41,7 @@
 (defn dispatch
   "dispatch the function by submitting it to the `*thread-pool*`"
   ^Future [^Runnable f]
-  (let [^ExecutorService pool (or *thread-pool* (ForkJoinPool/commonPool))]
+  (let [^ExecutorService pool (or *thread-pool* @default-pool)]
     (.submit ^ExecutorService pool ^Runnable f)))
 
 (defn unwrap-exception
@@ -287,17 +300,24 @@
   [port & body]
   (let [crossing-env (zipmap (keys &env) (repeatedly gensym))]
     `(let [c# ~port
-           captured-bindings# (Var/getThreadBindingFrame)]
-       (dispatch (^:once fn* []
-                             (let [~@(mapcat (fn [[l sym]] [sym `(^:once fn* [] ~(vary-meta l dissoc :tag))]) crossing-env)
-                                   f# ~(ioc/state-machine `(try
-                                                             ~@body
-                                                             (catch Throwable ~'e
-                                                               (unwrap-exception ~'e))) 1 [crossing-env &env] ioc/async-custom-terminators)
-                                   state# (-> (f#)
-                                              (ioc/aset-all! ioc/USER-START-IDX c#
-                                                             ioc/BINDINGS-IDX captured-bindings#))]
-                               (ioc/run-state-machine-wrapped state#))))
+           captured-bindings# (Var/getThreadBindingFrame)
+           ^Runnable task# (^:once fn* []
+                                       (let [~@(mapcat (fn [[l sym]] [sym `(^:once fn* [] ~(vary-meta l dissoc :tag))]) crossing-env)
+                                             f# ~(ioc/state-machine `(try
+                                                                       ~@body
+                                                                       (catch Throwable ~'e
+                                                                         (unwrap-exception ~'e))) 1 [crossing-env &env] ioc/async-custom-terminators)
+                                             state# (-> (f#)
+                                                        (ioc/aset-all! ioc/USER-START-IDX c#
+                                                                       ioc/BINDINGS-IDX captured-bindings#))]
+                                         (ioc/run-state-machine-wrapped state#)))
+           ^Future fut# (dispatch task#)]
+       (when (instance? CompletableFuture c#)
+         (.exceptionally ^CompletableFuture c#
+                         ^Function (reify Function
+                                     (apply [~'_ ~'_]
+                                       (println "cancelling future!")
+                                       (future-cancel fut#)))))
        c#)))
 
 (defmacro async
