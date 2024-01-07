@@ -27,10 +27,13 @@
     x))
 
 (defn class-satisfies?
+  "Checks if `protocol` is satisfied by the `class` just like Clojure's `satisfies?` does internally, but this version
+  is memoized and thus faster if called multiple times."
   [protocol ^Class c]
   (boolean (find-protocol-impl-from-class protocol c)))
 
 (defn instance-satisfies?
+  "Like Clojure's `satisfies?` but calls `class-satisfies?` when the protocol is not implemented directly."
   [protocol x]
   (or (boolean (find-protocol-impl-from-object protocol x))
       (class-satisfies? protocol (class x))))
