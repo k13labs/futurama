@@ -19,6 +19,12 @@
 
 (def ^:dynamic *thread-pool* (ForkJoinPool/commonPool))
 
+(defmacro with-pool
+  "Utility macro which binds *thread-pool* to the supplied pool and then evaluates the `body`."
+  [pool & body]
+  `(binding [*thread-pool* ~pool]
+     ~@body))
+
 (defn dispatch
   "dispatch the function by submitting it to the `*thread-pool*`"
   ^Future [^Runnable f]

@@ -1,7 +1,7 @@
 (ns futurama.core-test
   (:require [clojure.test :refer [deftest testing is]]
-            [futurama.core :refer [!<!! !<! !<!* async?
-                                   async async-> async->>
+            [futurama.core :refer [!<!! !<! !<!* with-pool
+                                   async async-> async->> async?
                                    async-for async-map async-reduce
                                    async-some async-every?
                                    async-prewalk async-postwalk
@@ -10,7 +10,7 @@
             [criterium.core :refer [report-result
                                     quick-benchmark
                                     with-progress-reporting]])
-  (:import [java.util.concurrent CompletableFuture ExecutionException]
+  (:import [java.util.concurrent Executors CompletableFuture ExecutionException]
            [clojure.lang ExceptionInfo]))
 
 (def ^:dynamic *test-val1* nil)
@@ -26,6 +26,18 @@
 (defn plus-a-times-b
   [a b]
   (* (+ a 100) b))
+
+(def test-pool
+  (delay
+    (Executors/newSingleThreadExecutor)))
+
+(deftest with-pool-macro-test
+  (testing "with-pool evals body"
+    (!<!!
+      (with-pool @test-pool
+        (async
+          (is (= 100
+                 (!<! (CompletableFuture/completedFuture 100)))))))))
 
 (deftest thread-first-macro-tests
   (testing "can thread first async->"

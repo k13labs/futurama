@@ -1,5 +1,8 @@
 This is a history of changes to k13labs/futurama
 
+# 0.3.9
+* Add `with-pool` macro
+
 # 0.3.8
 * Add support for `Future` and `IDeref`.
 * Rename and refactor internal `satisfies?` to `instance-satisfies?` and `class-satisfies?`
