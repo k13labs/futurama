@@ -276,8 +276,7 @@
                 nil)
               (box val)))
           (do
-            (.whenComplete ^CompletableFuture fut
-                           ^BiConsumer (reify BiConsumer
+            (let [^BiConsumer invoke-cb (reify BiConsumer
                                          (accept [_ val ex]
                                            (cond
                                              (u/instance-satisfies? impl/ReadPort val)
@@ -294,7 +293,8 @@
                                              (cb ex)
 
                                              :else
-                                             (cb nil)))))
+                                             (cb nil))))]
+              (.whenComplete ^CompletableFuture fut ^BiConsumer invoke-cb))
             nil)))))
   impl/WritePort
   (put! [fut val handler]
@@ -356,11 +356,12 @@
                                                             (ioc/run-state-machine-wrapped state#)))
                               ^Future fut# (dispatch task#)]
                           (when (instance? CompletableFuture c#)
-                            (.exceptionally ^CompletableFuture c#
-                                            ^Function (reify Function
-                                                        (apply [~'_ ~'_]
-                                                          (async-cancel! c#)
-                                                          (future-cancel fut#)))))
+                            (let [^Function cancel# (reify Function
+                                                      (apply [~'_ ~'_]
+                                                        (async-cancel! c#)
+                                                        (future-cancel fut#)))]
+                              (.exceptionally ^CompletableFuture c#
+                                              ^Function cancel#)))
                           c#)))))
 
 (defmacro async

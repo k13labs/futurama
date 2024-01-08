@@ -149,9 +149,8 @@
                    (fn [n]
                      (async
                        (when (odd? n)
-                         (do
-                           (!<! (timeout (- 1000 (* n 100))))
-                           n))))
+                         (!<! (timeout (- 1000 (* n 100))))
+                         n)))
                    (range 10)))))))
 
 (deftest async-every-test
@@ -161,9 +160,8 @@
                    (fn [n]
                      (async
                        (when (number? n)
-                         (do
-                           (!<! (timeout 50))
-                           true))))
+                         (!<! (timeout 50))
+                         true)))
                    (range 10))))))
   (testing "async-every? async test returns false when some false"
     (is (= false
@@ -171,9 +169,8 @@
                    (fn [n]
                      (async
                        (when (not= n 5)
-                         (do
-                           (!<! (timeout 50))
-                           true))))
+                         (!<! (timeout 50))
+                         true)))
                    (range 10)))))))
 
 (deftest async-reduce-test
