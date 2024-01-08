@@ -1,6 +1,9 @@
 This is a history of changes to k13labs/futurama
 
-# 0.5.0
+# 0.6.1
+* Code linting updates
+
+# 0.6.0
 * Add some no-doc tags to extra namespaces
 * Rename `cancel!` and `cancelled?` to `async-cancel!` and `async-cancelled?`
 
