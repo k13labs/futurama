@@ -4,7 +4,9 @@
             [clojure.core.async.impl.channels :refer [box]]
             [clojure.core.async.impl.ioc-macros :as ioc]
             [clojure.core.reducers :as r]
+            [futurama.protocols :as proto]
             [futurama.util :as u]
+            [futurama.state :as state]
             [futurama.deferred])
   (:import [clojure.lang Var IDeref IFn]
            [java.util.concurrent
@@ -16,6 +18,8 @@
             Future]
            [java.util.concurrent.locks Lock]
            [java.util.function Function BiConsumer]))
+
+(def ^:dynamic *thread-pool* nil)
 
 (defn fixed-threadpool
   "Creates a fixed-threadpool, by default uses the number of available processors."
@@ -29,8 +33,6 @@
   ^{:doc "Default ExecutorService used, corresponds with a FixedThreadPool as many threads as available processors."}
   default-pool
   (delay (fixed-threadpool)))
-
-(def ^:dynamic *thread-pool* nil)
 
 (defmacro with-pool
   "Utility macro which binds *thread-pool* to the supplied pool and then evaluates the `body`."
@@ -48,8 +50,7 @@
   "unwraps an ExecutionException or CompletionException via ex-cause until the root exception is returned"
   ^Throwable [^Throwable ex]
   (if-let [ce (and (or (instance? ExecutionException ex)
-                       (instance? CompletionException ex)
-                       (instance? InterruptedException ex))
+                       (instance? CompletionException ex))
                    (ex-cause ex))]
     ce
     ex))
@@ -61,6 +62,29 @@
     (throw (unwrap-exception v))
     v))
 
+(defn cancel!
+  "Cancels the async item."
+  [item]
+  (let [proto-cancel (when (u/instance-satisfies? proto/AsyncCancellable item)
+                       (proto/cancel item))
+        stack-cancel (state/set-value! item :cancelled true)]
+    (or proto-cancel stack-cancel false)))
+
+(defn cancelled?
+  "Checks if the current executing async item or one of its parents or provided item has been cancelled.
+  Also checks if the thread has been interrupted and restores the interrupt status."
+  ([]
+   (or (when (Thread/interrupted)
+         (.. (Thread/currentThread)
+             (interrupt))
+         true)
+       (some cancelled? (state/get-dynamic-items))
+       false))
+  ([item]
+   (or (proto/cancelled? item)
+       (state/get-value item :cancelled)
+       false)))
+
 (defn async?
   "returns true if v instance-satisfies? core.async's `ReadPort`"
   ^Boolean [v]
@@ -70,25 +94,37 @@
   "Asynchronously invokes the body inside a completable future, preserves the current thread binding frame,
   using by default the `ForkJoinPool/commonPool`, the pool used can be specified via `*thread-pool*` binding."
   ^CompletableFuture [& body]
-  `(let [binding-frame# (Var/cloneThreadBindingFrame) ;;; capture the thread local binding frame before start
-         ^CompletableFuture res-fut# (CompletableFuture.) ;;; this is the CompletableFuture being returned
-         ^Runnable fbody# (fn do-complete#
-                            []
-                            (try
-                              (Var/resetThreadBindingFrame binding-frame#) ;;; set the Clojure binding frame captured above
-                              (.complete res-fut# (do ~@body)) ;;; send the result of evaluating the body to the CompletableFuture
-                              (catch Throwable ~'e
-                                (.completeExceptionally res-fut# (unwrap-exception ~'e))))) ;;; if we catch an exception we send it to the CompletableFuture
-         ^Future fut# (dispatch fbody#)
-         ^Function cancel# (reify Function
-                             (apply [~'_ ~'_]
-                               (future-cancel fut#)))] ;;; submit the work to the pool and get the FutureTask doing the work
-     ;;; if the CompletableFuture returns exceptionally
-     ;;; then cancel the Future which is currently doing the work
-     (.exceptionally res-fut# cancel#)
-     res-fut#))
+  `(let [^CompletableFuture res-fut# (CompletableFuture.)] ;;; this is the CompletableFuture being returned
+     (state/push-item res-fut#
+                      (let [binding-frame# (Var/cloneThreadBindingFrame) ;;; capture the thread local binding frame before start
+                            ^Runnable fbody# (fn do-complete#
+                                               []
+                                               (let [thread-frame# (Var/getThreadBindingFrame)] ;;; get the Thread's binding frame
+                                                 (Var/resetThreadBindingFrame binding-frame#) ;;; set the Clojure binding frame captured
+                                                 (try
+                                                   (.complete res-fut# (do ~@body)) ;;; send the result of evaluating the body to the CompletableFuture
+                                                   (catch Throwable ~'e
+                                      ;;; if we catch an exception we send it to the CompletableFuture
+                                                     (.completeExceptionally res-fut# (unwrap-exception ~'e)))
+                                                   (finally
+                                                     (Var/resetThreadBindingFrame thread-frame#))))) ;;; restore the original Thread's binding frame
+                            ^Future fut# (dispatch fbody#)
+                            ^Function cancel# (reify Function
+                                                (apply [~'_ ~'_]
+                                                  (cancel! res-fut#)
+                                                  (future-cancel fut#)))] ;;; submit the work to the pool and get the FutureTask doing the work
+         ;;; if the CompletableFuture returns exceptionally
+         ;;; then cancel the Future which is currently doing the work
+                        (.exceptionally res-fut# cancel#)
+                        res-fut#))))
 
 (extend-type Future
+  proto/AsyncCancellable
+  (cancel [this]
+    (future-cancel this))
+  (cancelled? [this]
+    (future-cancelled? this))
+
   impl/ReadPort
   (take! [fut handler]
     (let [^Future fut fut
@@ -209,6 +245,12 @@
     (realized? ref)))
 
 (extend-type CompletableFuture
+  proto/AsyncCancellable
+  (cancel [this]
+    (future-cancel this))
+  (cancelled? [this]
+    (future-cancelled? this))
+
   impl/ReadPort
   (take! [fut handler]
     (let [^CompletableFuture fut fut
@@ -299,26 +341,27 @@
   completed; the pool used can be specified via `*thread-pool*` binding."
   [port & body]
   (let [crossing-env (zipmap (keys &env) (repeatedly gensym))]
-    `(let [c# ~port
-           captured-bindings# (Var/getThreadBindingFrame)
-           ^Runnable task# (^:once fn* []
-                                       (let [~@(mapcat (fn [[l sym]] [sym `(^:once fn* [] ~(vary-meta l dissoc :tag))]) crossing-env)
-                                             f# ~(ioc/state-machine `(try
-                                                                       ~@body
-                                                                       (catch Throwable ~'e
-                                                                         (unwrap-exception ~'e))) 1 [crossing-env &env] ioc/async-custom-terminators)
-                                             state# (-> (f#)
-                                                        (ioc/aset-all! ioc/USER-START-IDX c#
-                                                                       ioc/BINDINGS-IDX captured-bindings#))]
-                                         (ioc/run-state-machine-wrapped state#)))
-           ^Future fut# (dispatch task#)]
-       (when (instance? CompletableFuture c#)
-         (.exceptionally ^CompletableFuture c#
-                         ^Function (reify Function
-                                     (apply [~'_ ~'_]
-                                       (println "cancelling future!")
-                                       (future-cancel fut#)))))
-       c#)))
+    `(let [c# ~port]
+       (state/push-item c#
+                        (let [captured-bindings# (Var/getThreadBindingFrame)
+                              ^Runnable task# (^:once fn* []
+                                                          (let [~@(mapcat (fn [[l sym]] [sym `(^:once fn* [] ~(vary-meta l dissoc :tag))]) crossing-env)
+                                                                f# ~(ioc/state-machine `(try
+                                                                                          ~@body
+                                                                                          (catch Throwable ~'e
+                                                                                            (unwrap-exception ~'e))) 1 [crossing-env &env] ioc/async-custom-terminators)
+                                                                state# (-> (f#)
+                                                                           (ioc/aset-all! ioc/USER-START-IDX c#
+                                                                                          ioc/BINDINGS-IDX captured-bindings#))]
+                                                            (ioc/run-state-machine-wrapped state#)))
+                              ^Future fut# (dispatch task#)]
+                          (when (instance? CompletableFuture c#)
+                            (.exceptionally ^CompletableFuture c#
+                                            ^Function (reify Function
+                                                        (apply [~'_ ~'_]
+                                                          (cancel! c#)
+                                                          (future-cancel fut#)))))
+                          c#)))))
 
 (defmacro async
   "Asynchronously executes the body, returning immediately to the
