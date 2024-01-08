@@ -62,7 +62,7 @@
     (throw (unwrap-exception v))
     v))
 
-(defn cancel!
+(defn async-cancel!
   "Cancels the async item."
   [item]
   (let [proto-cancel (when (u/instance-satisfies? proto/AsyncCancellable item)
@@ -70,7 +70,7 @@
         stack-cancel (state/set-value! item :cancelled true)]
     (or proto-cancel stack-cancel false)))
 
-(defn cancelled?
+(defn async-cancelled?
   "Checks if the current executing async item or one of its parents or provided item has been cancelled.
   Also checks if the thread has been interrupted and restores the interrupt status."
   ([]
@@ -78,7 +78,7 @@
          (.. (Thread/currentThread)
              (interrupt))
          true)
-       (some cancelled? (state/get-dynamic-items))
+       (some async-cancelled? (state/get-dynamic-items))
        false))
   ([item]
    (or (proto/cancelled? item)
@@ -111,7 +111,7 @@
                             ^Future fut# (dispatch fbody#)
                             ^Function cancel# (reify Function
                                                 (apply [~'_ ~'_]
-                                                  (cancel! res-fut#)
+                                                  (async-cancel! res-fut#)
                                                   (future-cancel fut#)))] ;;; submit the work to the pool and get the FutureTask doing the work
          ;;; if the CompletableFuture returns exceptionally
          ;;; then cancel the Future which is currently doing the work
@@ -359,7 +359,7 @@
                             (.exceptionally ^CompletableFuture c#
                                             ^Function (reify Function
                                                         (apply [~'_ ~'_]
-                                                          (cancel! c#)
+                                                          (async-cancel! c#)
                                                           (future-cancel fut#)))))
                           c#)))))
 

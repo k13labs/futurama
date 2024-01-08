@@ -5,7 +5,8 @@
                                    async-for async-map async-reduce
                                    async-some async-every?
                                    async-prewalk async-postwalk
-                                   completable-future] :as async]
+                                   async-cancel! async-cancelled?
+                                   completable-future]]
             [clojure.core.async :refer [go timeout put! take! <! >! <!!] :as a]
             [criterium.core :refer [report-result
                                     quick-benchmark
@@ -51,7 +52,7 @@
           s (atom 0)
           f (completable-future
               (try
-                (while (not (async/cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
+                (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
                   (Thread/sleep 10)
                   (println "future looping..." (swap! s inc)))
                 (println "ended future looping.")
@@ -61,15 +62,15 @@
                   (deliver a true))))]
       (go
         (<! (timeout 100))
-        (async/cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
+        (async-cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
       (is (true? @a))
-      (is (true? (async/cancelled? f)))))
+      (is (true? (async-cancelled? f)))))
   (testing "cancellable async block is interrupted test"
     (let [a (promise)
           s (atom 0)
           f (async
               (try
-                (while (not (async/cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
+                (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
                   (!<! (timeout 10))
                   (println "future looping..." (swap! s inc)))
                 (println "ended future looping.")
@@ -79,9 +80,9 @@
                   (deliver a true))))]
       (go
         (<! (timeout 100))
-        (async/cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
+        (async-cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
       (is (true? @a))
-      (is (true? (async/cancelled? f)))))
+      (is (true? (async-cancelled? f)))))
   (testing "cancellable nested async cancellable is interrupted test"
     (let [a (promise)
           s (atom 0)
@@ -89,7 +90,7 @@
               (completable-future
                 (async
                   (try
-                    (while (not (async/cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
+                    (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
                       (!<! (timeout 10))
                       (println "future looping..." (swap! s inc)))
                     (println "ended future looping.")
@@ -99,9 +100,9 @@
                       (deliver a true))))))]
       (go
         (<! (timeout 100))
-        (async/cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
+        (async-cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
       (is (true? @a))
-      (is (true? (async/cancelled? f))))))
+      (is (true? (async-cancelled? f))))))
 
 (deftest with-pool-macro-test
   (testing "with-pool evals body"

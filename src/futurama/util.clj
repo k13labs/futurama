@@ -1,4 +1,4 @@
-(ns futurama.util
+(ns ^:no-doc futurama.util
   (:refer-clojure :exclude [satisfies? find-protocol-impl]))
 
 (defn- super-chain [^Class c]

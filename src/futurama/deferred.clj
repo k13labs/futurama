@@ -1,4 +1,4 @@
-(ns futurama.deferred
+(ns ^:no-doc futurama.deferred
   (:require [clojure.core.async :refer [take!]]
             [clojure.core.async.impl.protocols :as impl]
             [clojure.core.async.impl.channels :refer [box]]

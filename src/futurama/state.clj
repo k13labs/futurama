@@ -1,4 +1,4 @@
-(ns futurama.state
+(ns ^:no-doc futurama.state
   (:import [java.util Map WeakHashMap]))
 
 (defonce ^{:doc "Internal global state mananged using a Synchronized WeakHashMap"

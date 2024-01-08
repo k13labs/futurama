@@ -1,6 +1,10 @@
 This is a history of changes to k13labs/futurama
 
 # 0.5.0
+* Add some no-doc tags to extra namespaces
+* Rename `cancel!` and `cancelled?` to `async-cancel!` and `async-cancelled?`
+
+# 0.5.0
 * Add custom state to keep track of async items
 * Add custom cancel strategy which combines bound state, global weak state, and custom protocol impl
 
