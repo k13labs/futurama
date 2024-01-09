@@ -92,7 +92,7 @@
 
 (defmacro completable-future
   "Asynchronously invokes the body inside a completable future, preserves the current thread binding frame,
-  using by default the `ForkJoinPool/commonPool`, the pool used can be specified via `*thread-pool*` binding."
+  using by default the `default-pool`, the pool used can be specified via `*thread-pool*` binding."
   ^CompletableFuture [& body]
   `(let [^CompletableFuture res-fut# (CompletableFuture.)] ;;; this is the CompletableFuture being returned
      (state/push-item res-fut#

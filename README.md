@@ -4,7 +4,7 @@
 
 Futurama is a Clojure library for more deeply integrating async abstractions in the Clojure and JVM ecosystem with Clojure [core.async](https://github.com/clojure/core.async).
 
-It adds support for [CompletableFuture](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletableFuture.html) and [IDeferred](https://github.com/clj-commons/manifold/blob/master/src/manifold/deferred.clj) to be used in approximately the same fashion as Clojure [core.async](https://github.com/clojure/core.async) channels, and for `Future` and `IDeref` to be read in the same manner as well.
+It adds support for [CompletableFuture](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/CompletableFuture.html) and [IDeferred](https://github.com/clj-commons/manifold/blob/master/src/manifold/deferred.clj) to be used in approximately the same fashion as Clojure [core.async](https://github.com/clojure/core.async) channels, and for [Future](https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/Future.html) and [IDeref](https://github.com/clojure/clojure/blob/master/src/jvm/clojure/lang/IDeref.java) to be read in a similar manner as well.
 
 # _Usage_
 
