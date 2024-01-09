@@ -1,5 +1,5 @@
 (ns futurama.core
-  (:require [clojure.core.async :refer [<! <!! put! take! close! thread] :as async]
+  (:require [clojure.core.async :refer [<! <!! put! take! close! chan thread] :as async]
             [clojure.core.async.impl.protocols :as impl]
             [clojure.core.async.impl.channels :refer [box]]
             [clojure.core.async.impl.ioc-macros :as ioc]
@@ -7,7 +7,8 @@
             [futurama.protocols :as proto]
             [futurama.util :as u]
             [futurama.state :as state]
-            [futurama.deferred])
+            [futurama.deferred]
+            [manifold.deferred :as d])
   (:import [clojure.lang Var IDeref IFn]
            [java.util.concurrent
             CompletableFuture
@@ -81,7 +82,8 @@
        (some async-cancelled? (state/get-dynamic-items))
        false))
   ([item]
-   (or (proto/cancelled? item)
+   (or (when (u/instance-satisfies? proto/AsyncCancellable item)
+         (proto/cancelled? item))
        (state/get-value item :cancelled)
        false)))
 
@@ -298,6 +300,8 @@
             nil)))))
   impl/WritePort
   (put! [fut val handler]
+    (when (nil? val)
+      (throw (IllegalArgumentException. "Can't put nil on an async thing, close it instead!")))
     (let [^CompletableFuture fut fut
           ^Lock handler handler]
       (if (.isDone fut)
@@ -337,7 +341,7 @@
   go block threads, causing all go block processing to stop. This includes
   core.async blocking ops (those ending in !!) and other blocking IO.
 
-  Returns a channel which will receive the result of the body when
+  Returns the provided port which will receive the result of the body when
   completed; the pool used can be specified via `*thread-pool*` binding."
   [port & body]
   (let [crossing-env (zipmap (keys &env) (repeatedly gensym))]
@@ -380,7 +384,45 @@
   completed; the pool used can be specified via `*thread-pool*` binding."
   [& body]
   `(async!
+    (chan 1)
+    ~@body))
+
+(defmacro async-future
+  "Asynchronously executes the body, returning immediately to the
+  calling thread. Additionally, any visible calls to !<!, <!, >! and alt!/alts!
+  channel operations within the body will block (if necessary) by
+  'parking' the calling thread rather than tying up an OS thread.
+  Upon completion of the operation, the body will be resumed.
+
+  async blocks should not (either directly or indirectly) perform operations
+  that may block indefinitely. Doing so risks depleting the fixed pool of
+  go block threads, causing all go block processing to stop. This includes
+  core.async blocking ops (those ending in !!) and other blocking IO.
+
+  Returns a CompletableFuture which will receive the result of the body when
+  completed; the pool used can be specified via `*thread-pool*` binding."
+  [& body]
+  `(async!
     (CompletableFuture.)
+    ~@body))
+
+(defmacro async-deferred
+  "Asynchronously executes the body, returning immediately to the
+  calling thread. Additionally, any visible calls to !<!, <!, >! and alt!/alts!
+  channel operations within the body will block (if necessary) by
+  'parking' the calling thread rather than tying up an OS thread.
+  Upon completion of the operation, the body will be resumed.
+
+  async blocks should not (either directly or indirectly) perform operations
+  that may block indefinitely. Doing so risks depleting the fixed pool of
+  go block threads, causing all go block processing to stop. This includes
+  core.async blocking ops (those ending in !!) and other blocking IO.
+
+  Returns a Deferred which will receive the result of the body when
+  completed; the pool used can be specified via `*thread-pool*` binding."
+  [& body]
+  `(async!
+    (d/deferred)
     ~@body))
 
 (defmacro !<!
@@ -394,7 +436,10 @@
   `(rethrow-exception
     (let [~'r ~v]
       (if (u/instance-satisfies? impl/ReadPort ~'r)
-        (<! ~'r)
+        (loop [~'r (<! ~'r)]
+          (if-not (u/instance-satisfies? impl/ReadPort ~'r)
+            ~'r
+            (recur (<! ~'r))))
         ~'r))))
 
 (defmacro !<!*
@@ -417,7 +462,10 @@
   `(rethrow-exception
     (let [~'r ~v]
       (if (u/instance-satisfies? impl/ReadPort ~'r)
-        (<!! ~'r)
+        (loop [~'r (<!! ~'r)]
+          (if-not (u/instance-satisfies? impl/ReadPort ~'r)
+            ~'r
+            (recur (<!! ~'r))))
         ~'r))))
 
 (defmacro async-for
@@ -473,7 +521,7 @@
   set of second items in each coll, until any one of the colls is
   exhausted.  Any remaining items in other colls are ignored. Function
   f should accept number-of-colls arguments."
-  ^CompletableFuture [f coll & coll-seq]
+  [f coll & coll-seq]
   (async-for
    [params (let [colls (!<!* (cons coll coll-seq))]
              (->> (apply interleave colls)
@@ -482,15 +530,15 @@
 
 (defn- async-do-reduce*
   "internal reducer function to work with async args"
-  ^CompletableFuture [f v x]
+  [f v x]
   (async
    (f (!<! v) (!<! x))))
 
 (defn async-reduce
   "Like core/reduce except, when init is not provided, (f) is used, and async results are read with !<!."
-  (^CompletableFuture [f coll]
+  ([f coll]
    (async-reduce f (f) coll))
-  (^CompletableFuture [f init coll]
+  ([f init coll]
    (async
     (r/reduce (partial async-do-reduce* f)
               (!<! init)
@@ -498,7 +546,7 @@
 
 (defn- async-some-call*
   "internal async-some fn handler to handle async args and result"
-  [^CompletableFuture result pred item]
+  [result pred item]
   (async
    (when-let [value (!<! (pred (!<! item)))]
      (put! result value))))
@@ -512,8 +560,8 @@
   this function returns the first asynchronous result that completes
   and evaluates to logical true, but not necessarily the first one
   in sequential order."
-  ^CompletableFuture [pred coll]
-  (let [^CompletableFuture result (CompletableFuture.)]
+  [pred coll]
+  (let [result (chan 1)]
     (async!
      result
      (let [results (doall
@@ -535,15 +583,15 @@
 
 (defn- async-every-call*
   "internal async-every? fn handler to handle async args and result"
-  ^CompletableFuture [^CompletableFuture result pred item]
+  [result pred item]
   (async
    (when-not (!<! (pred (!<! item)))
      (put! result false))))
 
 (defn async-every?
   "Returns true if (pred x) is logical true for every x in coll, else false."
-  ^CompletableFuture [pred coll]
-  (let [^CompletableFuture result (CompletableFuture.)]
+  [pred coll]
+  (let [result (chan 1)]
     (async!
      result
      (let [results (for [item coll]
@@ -604,7 +652,7 @@
 
 (defn- async-walk-record*
   "internal async walk adapter to walk a record"
-  ^CompletableFuture [innerf r x]
+  [innerf r x]
   (async
    (conj (!<! r) (!<! (innerf (!<! x))))))
 
@@ -613,7 +661,7 @@
   functions.  Applies inner to each element of form, building up a
   data structure of the same type, then applies outer to the result.
   Recognizes all Clojure data structures. Consumes seqs as with doall."
-  ^CompletableFuture [inner outer form]
+  [inner outer form]
   (async
    (let [form (!<! form)]
      (cond
@@ -641,10 +689,10 @@
   "Performs a depth-first, post-order traversal of form.  Calls f on
   each sub-form, uses f's return value in place of the original.
   Recognizes all Clojure data structures. Consumes seqs as with doall."
-  ^CompletableFuture [f form]
+  [f form]
   (async-walk (partial async-postwalk f) f form))
 
 (defn async-prewalk
   "Like postwalk, but does pre-order traversal."
-  ^CompletableFuture [f form]
+  [f form]
   (async-walk (partial async-prewalk f) identity (f form)))

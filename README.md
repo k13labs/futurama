@@ -51,7 +51,7 @@ See the existing tests for more examples.
 
 Futurama is built, tested, and deployed using [Clojure Tools Deps](https://clojure.org/guides/deps_and_cli).
 
-CMake is used to simplify invocation of some commands.
+GNU Make is used to simplify invocation of some commands.
 
 # _Availability_
 

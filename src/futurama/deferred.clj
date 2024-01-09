@@ -31,6 +31,8 @@
         nil)))
   impl/WritePort
   (put! [d val handler]
+    (when (nil? val)
+      (throw (IllegalArgumentException. "Can't put nil on an async thing, close it instead!")))
     (let [^Lock handler handler]
       (if (d/realized? d)
         (do

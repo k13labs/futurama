@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest testing is]]
             [futurama.core :refer [!<!! !<! !<!* with-pool
                                    async async-> async->> async?
+                                   async-future async-deferred
                                    async-for async-map async-reduce
                                    async-some async-every?
                                    async-prewalk async-postwalk
@@ -57,8 +58,44 @@
                   (println "future looping..." (swap! s inc)))
                 (println "ended future looping.")
                 (deliver a true)
-                (catch InterruptedException _
-                  (println "interrupted looping.")
+                (catch Throwable e
+                  (println "interrupted looping by:" (type e))
+                  (deliver a true))))]
+      (go
+        (<! (timeout 100))
+        (async-cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
+      (is (true? @a))
+      (is (true? (async-cancelled? f)))))
+  (testing "cancellable async-future block is interrupted test"
+    (let [a (promise)
+          s (atom 0)
+          f (async-future
+              (try
+                (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
+                  (Thread/sleep 10)
+                  (println "future looping..." (swap! s inc)))
+                (println "ended future looping.")
+                (deliver a true)
+                (catch Throwable e
+                  (println "interrupted looping by:" (type e))
+                  (deliver a true))))]
+      (go
+        (<! (timeout 100))
+        (async-cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
+      (is (true? @a))
+      (is (true? (async-cancelled? f)))))
+  (testing "cancellable async-deferred block is interrupted test"
+    (let [a (promise)
+          s (atom 0)
+          f (async-deferred
+              (try
+                (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
+                  (Thread/sleep 10)
+                  (println "future looping..." (swap! s inc)))
+                (println "ended future looping.")
+                (deliver a true)
+                (catch Throwable e
+                  (println "interrupted looping by:" (type e))
                   (deliver a true))))]
       (go
         (<! (timeout 100))
@@ -75,8 +112,8 @@
                   (println "future looping..." (swap! s inc)))
                 (println "ended future looping.")
                 (deliver a true)
-                (catch InterruptedException _
-                  (println "interrupted looping.")
+                (catch Throwable e
+                  (println "interrupted looping by:" (type e))
                   (deliver a true))))]
       (go
         (<! (timeout 100))
@@ -95,8 +132,8 @@
                       (println "future looping..." (swap! s inc)))
                     (println "ended future looping.")
                     (deliver a true)
-                    (catch InterruptedException _
-                      (println "interrupted looping.")
+                    (catch Exception e
+                      (println "interrupted looping by:" (type e))
                       (deliver a true))))))]
       (go
         (<! (timeout 100))
@@ -322,11 +359,33 @@
                                    p)))))))))))))))
 
 (deftest error-handling
-  (testing "throws async exception on blocking deref - @"
+  (testing "throws async exception on blocking deref from completable future - @"
     (is (thrown-with-msg?
           ExceptionInfo #"foobar"
           (try
-            @(async
+            @(completable-future
+               (throw (ex-info "foobar" {}))
+               ::result)
+            ;;; this is just necessary to test when an exception is thrown
+            ;;; via Deref it is wrapped in an ExecutionException
+            (catch ExecutionException ee
+              (throw (ex-cause ee)))))))
+  (testing "throws async exception on blocking deref from async! with completable future - @"
+    (is (thrown-with-msg?
+          ExceptionInfo #"foobar"
+          (try
+            @(async-future
+               (throw (ex-info "foobar" {}))
+               ::result)
+            ;;; this is just necessary to test when an exception is thrown
+            ;;; via Deref it is wrapped in an ExecutionException
+            (catch ExecutionException ee
+              (throw (ex-cause ee)))))))
+  (testing "throws async exception on blocking deref from async! with completable future - @"
+    (is (thrown-with-msg?
+          ExceptionInfo #"foobar"
+          (try
+            @(async-deferred
                (throw (ex-info "foobar" {}))
                ::result)
             ;;; this is just necessary to test when an exception is thrown
