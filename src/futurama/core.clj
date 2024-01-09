@@ -279,23 +279,23 @@
               (box val)))
           (do
             (let [^BiConsumer invoke-cb (reify BiConsumer
-                                         (accept [_ val ex]
-                                           (cond
-                                             (u/instance-satisfies? impl/ReadPort val)
-                                             (take! val (fn do-read
-                                                          [val]
-                                                          (if (u/instance-satisfies? impl/ReadPort val)
-                                                            (take! val do-read)
-                                                            (cb val))))
+                                          (accept [_ val ex]
+                                            (cond
+                                              (u/instance-satisfies? impl/ReadPort val)
+                                              (take! val (fn do-read
+                                                           [val]
+                                                           (if (u/instance-satisfies? impl/ReadPort val)
+                                                             (take! val do-read)
+                                                             (cb val))))
 
-                                             (some? val)
-                                             (cb val)
+                                              (some? val)
+                                              (cb val)
 
-                                             (some? ex)
-                                             (cb ex)
+                                              (some? ex)
+                                              (cb ex)
 
-                                             :else
-                                             (cb nil))))]
+                                              :else
+                                              (cb nil))))]
               (.whenComplete ^CompletableFuture fut ^BiConsumer invoke-cb))
             nil)))))
   impl/WritePort
