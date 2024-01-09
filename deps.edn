@@ -15,6 +15,7 @@
   :test {:extra-paths ["test"]
          :extra-deps {lambdaisland/kaocha {:mvn/version "1.80.1274"}
                       org.clojure/test.check {:mvn/version "1.1.1"}
+                      org.slf4j/slf4j-simple {:mvn/version "2.0.11"}
                       pjstadig/humane-test-output {:mvn/version "0.10.0"}}}
 
   :runner {:main-opts ["-e" "(println \"warn-on-reflection =\" (set! *warn-on-reflection* true))"
