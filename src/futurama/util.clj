@@ -1,8 +1,7 @@
 (ns ^:no-doc futurama.util
   (:refer-clojure :exclude [satisfies? find-protocol-impl])
   (:require [clojure.core.async :as async]
-            [clojure.core.async.impl.protocols :as impl])
-  (:import [java.util.concurrent.locks Lock]))
+            [clojure.core.async.impl.protocols :as impl]))
 
 (defn- super-chain [^Class c]
   (when c

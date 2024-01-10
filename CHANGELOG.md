@@ -1,5 +1,10 @@
 This is a history of changes to k13labs/futurama
 
+# 0.6.3
+* Simplify reading macros !<! and !<!! using new AsyncReader type
+* Refactor async reader functions into util reusable reading fn
+* Add `async-cancellable?` fn to easily test if something can be cancelled
+
 # 0.6.2
 * Change default async output to channel of size 1 to more easily support async merge and other ops
 * Add purpose-built `async-future` and `async-deferred` macros to more easily create either.
