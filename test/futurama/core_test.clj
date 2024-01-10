@@ -319,6 +319,13 @@
                    (!<!
                      (completable-future
                        [*test-val1* test-val2])))))))))
+  (testing "sequential collection non-blocking take - <!*"
+    (<!!
+      (async
+        (is (= (range 1 11)
+               (!<!*
+                 (for [n (range 10)]
+                   (async (inc n)))))))))
   (testing "sequential collection non-blocking take - !<!*"
     (<!!
       (async

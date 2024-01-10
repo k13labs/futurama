@@ -1,5 +1,10 @@
 This is a history of changes to k13labs/futurama
 
+# 0.6.4
+* Create <! <!! and <!* version of take macros which do not recursive read.
+* Only !<!, !<!! and !<!* explicitly recursive read from channels now, to optimize things.
+* Simplified ReadPort implementations so they do not recursive read, only specific macros do that now.
+
 # 0.6.3
 * Simplify reading macros !<! and !<!! using new AsyncReader type
 * Refactor async reader functions into util reusable reading fn

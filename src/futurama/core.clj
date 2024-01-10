@@ -1,5 +1,5 @@
 (ns futurama.core
-  (:require [clojure.core.async :refer [<! <!! put! take! close! chan thread] :as async]
+  (:require [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as impl]
             [clojure.core.async.impl.channels :refer [box]]
             [clojure.core.async.impl.ioc-macros :as ioc]
@@ -148,24 +148,17 @@
                       (.get ^Future fut)
                       (catch Throwable e
                         (unwrap-exception e)))]
-            (if (async? val)
-              (do
-                (take! val (u/async-reader-handler cb))
-                nil)
-              (box val)))
+            (box val))
 
           :else
           (do
-            (thread
+            (async/thread
               (let [[val ex]
                     (try
                       [(.get ^Future fut) nil]
                       (catch Throwable e
                         [nil e]))]
                 (cond
-                  (async? val)
-                  (take! val (u/async-reader-handler cb))
-
                   (some? val)
                   (cb val)
 
@@ -200,24 +193,17 @@
                       (deref ref)
                       (catch Throwable e
                         (unwrap-exception e)))]
-            (if (async? val)
-              (do
-                (take! val (u/async-reader-handler cb))
-                nil)
-              (box val)))
+            (box val))
 
           :else
           (do
-            (thread
+            (async/thread
               (let [[val ex]
                     (try
                       [(deref ref) nil]
                       (catch Throwable e
                         [nil e]))]
                 (cond
-                  (async? val)
-                  (take! val (u/async-reader-handler cb))
-
                   (some? val)
                   (cb val)
 
@@ -257,18 +243,11 @@
                       (.getNow fut nil)
                       (catch Throwable e
                         (unwrap-exception e)))]
-            (if (async? val)
-              (do
-                (take! val (u/async-reader-handler cb))
-                nil)
-              (box val)))
+            (box val))
           (do
             (let [^BiConsumer invoke-cb (reify BiConsumer
                                           (accept [_ val ex]
                                             (cond
-                                              (async? val)
-                                              (take! val (u/async-reader-handler cb))
-
                                               (some? val)
                                               (cb val)
 
@@ -365,7 +344,7 @@
   completed; the pool used can be specified via `*thread-pool*` binding."
   [& body]
   `(async!
-    (chan 1)
+    (async/chan 1)
     ~@body))
 
 (defmacro async-future
@@ -418,7 +397,7 @@
       (when-let [cb (commit-handler)]
         (if (async? val)
           (do
-            (take! val (u/async-reader-handler cb))
+            (async/take! val (u/async-reader-handler cb))
             nil)
           (box val))))))
 
@@ -427,7 +406,7 @@
   [x]
   (AsyncReader. x))
 
-(defmacro !<!
+(defmacro <!
   "An improved macro version of <!, which also rethrows exceptions returned over the channel.
   Must be called INSIDE a (go ...) or (async ...) block.
   - Will return nil if closed.
@@ -435,7 +414,37 @@
   - Will throw if an Exception is taken from port.
   - Will return the raw value if it is not a ReadPort"
   [v]
-  `(rethrow-exception (<! (->async-reader ~v))))
+  `(rethrow-exception (async/<! ~v)))
+
+(defmacro <!*
+  "Like <! but works with collections of async values"
+  [coll]
+  `(loop [~'icoll (not-empty ~coll)
+          ~'ocoll []]
+     (if (nil? ~'icoll)
+       ~'ocoll
+       (recur (next ~'icoll) (conj ~'ocoll (<! (first ~'icoll)))))))
+
+(defmacro <!!
+  "An improved macro version of <!!, which also rethrows exceptions returned over the channel.
+  Must be called OUTSIDE a (go ...) or (async ...) block.
+  - Will return nil if closed.
+  - Will block if nothing is available.
+  - Will throw if a Exception is taken from port.
+  - Will return the raw value if it is not a ReadPort"
+  [v]
+  `(rethrow-exception (async/<!! ~v)))
+
+(defmacro !<!
+  "An improved macro version of <!, which also rethrows exceptions returned over the channel.
+  Must be called INSIDE a (go ...) or (async ...) block.
+  - Will return nil if closed.
+  - Will park if nothing is available.
+  - Will throw if an Exception is taken from port.
+  - Will return the raw value if it is not a ReadPort
+  - Will fully read through any async result returned"
+  [v]
+  `(<! (->async-reader ~v)))
 
 (defmacro !<!*
   "Like !<! but works with collections of async values"
@@ -452,9 +461,10 @@
   - Will return nil if closed.
   - Will block if nothing is available.
   - Will throw if a Exception is taken from port.
-  - Will return the raw value if it is not a ReadPort"
+  - Will return the raw value if it is not a ReadPort
+  - Will fully read through any async result returned"
   [v]
-  `(rethrow-exception (<!! (->async-reader ~v))))
+  `(<!! (->async-reader ~v)))
 
 (defmacro async-for
   "works like a for macro, but supports core.async operations.
@@ -537,7 +547,7 @@
   [result pred item]
   (async
    (when-let [value (!<! (pred (!<! item)))]
-     (put! result value))))
+     (async/put! result value))))
 
 (defn async-some
   "Concurrently executes (pred x) and returns the first returned
@@ -549,7 +559,7 @@
   and evaluates to logical true, but not necessarily the first one
   in sequential order."
   [pred coll]
-  (let [result (chan 1)]
+  (let [result (async/chan 1)]
     (async!
      result
      (let [results (doall
@@ -561,7 +571,7 @@
            nil
 
            (nil? results)
-           (close! result)
+           (async/close! result)
 
            :else
            (do
@@ -574,12 +584,12 @@
   [result pred item]
   (async
    (when-not (!<! (pred (!<! item)))
-     (put! result false))))
+     (async/put! result false))))
 
 (defn async-every?
   "Returns true if (pred x) is logical true for every x in coll, else false."
   [pred coll]
-  (let [result (chan 1)]
+  (let [result (async/chan 1)]
     (async!
      result
      (let [results (for [item coll]
@@ -590,7 +600,7 @@
            nil
 
            (nil? results)
-           (put! result true)
+           (async/put! result true)
 
            :else
            (do

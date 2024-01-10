@@ -1,7 +1,6 @@
 (ns ^:no-doc futurama.deferred
   (:require [clojure.core.async.impl.protocols :as impl]
             [clojure.core.async.impl.channels :refer [box]]
-            [futurama.util :as u]
             [manifold.deferred :as d])
   (:import [java.util.concurrent.locks Lock]
            [manifold.deferred IDeferred]))
@@ -16,7 +15,7 @@
                              (.unlock handler)
                              take-cb))]
       (when-let [cb (commit-handler)]
-        (d/on-realized d (u/async-reader-handler cb) cb)
+        (d/on-realized d cb cb)
         nil)))
   impl/WritePort
   (put! [d val handler]
