@@ -18,6 +18,13 @@
       (take! d (partial deliver p))
       (d/success! d v)
       (is (= v @p))))
+  (testing "async take! test - realized"
+    (let [d (d/deferred)
+          v {:foo "bar"}
+          p (promise)]
+      (d/success! d v)
+      (take! d (partial deliver p))
+      (is (= v @p))))
   (testing "async put! test"
     (let [d (d/deferred)
           v {:foo "bar"}]

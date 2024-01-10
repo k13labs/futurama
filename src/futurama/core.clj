@@ -63,10 +63,15 @@
     (throw (unwrap-exception v))
     v))
 
+(defn async-cancellable?
+  "Determines if v instance-satisfies? `AsyncCancellable`"
+  [v]
+  (u/instance-satisfies? proto/AsyncCancellable v))
+
 (defn async-cancel!
   "Cancels the async item."
   [item]
-  (let [proto-cancel (when (u/instance-satisfies? proto/AsyncCancellable item)
+  (let [proto-cancel (when (async-cancellable? item)
                        (proto/cancel item))
         stack-cancel (state/set-value! item :cancelled true)]
     (or proto-cancel stack-cancel false)))
@@ -82,7 +87,7 @@
        (some async-cancelled? (state/get-dynamic-items))
        false))
   ([item]
-   (or (when (u/instance-satisfies? proto/AsyncCancellable item)
+   (or (when (async-cancellable? item)
          (proto/cancelled? item))
        (state/get-value item :cancelled)
        false)))
@@ -143,13 +148,9 @@
                       (.get ^Future fut)
                       (catch Throwable e
                         (unwrap-exception e)))]
-            (if (u/instance-satisfies? impl/ReadPort val)
+            (if (async? val)
               (do
-                (take! val (fn do-read
-                             [val]
-                             (if (u/instance-satisfies? impl/ReadPort val)
-                               (take! val do-read)
-                               (cb val))))
+                (take! val (u/async-reader-handler cb))
                 nil)
               (box val)))
 
@@ -162,12 +163,8 @@
                       (catch Throwable e
                         [nil e]))]
                 (cond
-                  (u/instance-satisfies? impl/ReadPort val)
-                  (take! val (fn do-read
-                               [val]
-                               (if (u/instance-satisfies? impl/ReadPort val)
-                                 (take! val do-read)
-                                 (cb val))))
+                  (async? val)
+                  (take! val (u/async-reader-handler cb))
 
                   (some? val)
                   (cb val)
@@ -203,13 +200,9 @@
                       (deref ref)
                       (catch Throwable e
                         (unwrap-exception e)))]
-            (if (u/instance-satisfies? impl/ReadPort val)
+            (if (async? val)
               (do
-                (take! val (fn do-read
-                             [val]
-                             (if (u/instance-satisfies? impl/ReadPort val)
-                               (take! val do-read)
-                               (cb val))))
+                (take! val (u/async-reader-handler cb))
                 nil)
               (box val)))
 
@@ -222,12 +215,8 @@
                       (catch Throwable e
                         [nil e]))]
                 (cond
-                  (u/instance-satisfies? impl/ReadPort val)
-                  (take! val (fn do-read
-                               [val]
-                               (if (u/instance-satisfies? impl/ReadPort val)
-                                 (take! val do-read)
-                                 (cb val))))
+                  (async? val)
+                  (take! val (u/async-reader-handler cb))
 
                   (some? val)
                   (cb val)
@@ -268,25 +257,17 @@
                       (.getNow fut nil)
                       (catch Throwable e
                         (unwrap-exception e)))]
-            (if (u/instance-satisfies? impl/ReadPort val)
+            (if (async? val)
               (do
-                (take! val (fn do-read
-                             [val]
-                             (if (u/instance-satisfies? impl/ReadPort val)
-                               (take! val do-read)
-                               (cb val))))
+                (take! val (u/async-reader-handler cb))
                 nil)
               (box val)))
           (do
             (let [^BiConsumer invoke-cb (reify BiConsumer
                                           (accept [_ val ex]
                                             (cond
-                                              (u/instance-satisfies? impl/ReadPort val)
-                                              (take! val (fn do-read
-                                                           [val]
-                                                           (if (u/instance-satisfies? impl/ReadPort val)
-                                                             (take! val do-read)
-                                                             (cb val))))
+                                              (async? val)
+                                              (take! val (u/async-reader-handler cb))
 
                                               (some? val)
                                               (cb val)
@@ -425,6 +406,27 @@
     (d/deferred)
     ~@body))
 
+(deftype AsyncReader [val]
+  impl/ReadPort
+  (take! [_ handler]
+    (let [^Lock handler handler
+          commit-handler (fn do-commit []
+                           (.lock handler)
+                           (let [take-cb (and (impl/active? handler) (impl/commit handler))]
+                             (.unlock handler)
+                             take-cb))]
+      (when-let [cb (commit-handler)]
+        (if (async? val)
+          (do
+            (take! val (u/async-reader-handler cb))
+            nil)
+          (box val))))))
+
+(defn ->async-reader
+  "Creates an AsyncReader to read anything via `take!`"
+  [x]
+  (AsyncReader. x))
+
 (defmacro !<!
   "An improved macro version of <!, which also rethrows exceptions returned over the channel.
   Must be called INSIDE a (go ...) or (async ...) block.
@@ -433,14 +435,7 @@
   - Will throw if an Exception is taken from port.
   - Will return the raw value if it is not a ReadPort"
   [v]
-  `(rethrow-exception
-    (let [~'r ~v]
-      (if (u/instance-satisfies? impl/ReadPort ~'r)
-        (loop [~'r (<! ~'r)]
-          (if-not (u/instance-satisfies? impl/ReadPort ~'r)
-            ~'r
-            (recur (<! ~'r))))
-        ~'r))))
+  `(rethrow-exception (<! (->async-reader ~v))))
 
 (defmacro !<!*
   "Like !<! but works with collections of async values"
@@ -459,14 +454,7 @@
   - Will throw if a Exception is taken from port.
   - Will return the raw value if it is not a ReadPort"
   [v]
-  `(rethrow-exception
-    (let [~'r ~v]
-      (if (u/instance-satisfies? impl/ReadPort ~'r)
-        (loop [~'r (<!! ~'r)]
-          (if-not (u/instance-satisfies? impl/ReadPort ~'r)
-            ~'r
-            (recur (<!! ~'r))))
-        ~'r))))
+  `(rethrow-exception (<!! (->async-reader ~v))))
 
 (defmacro async-for
   "works like a for macro, but supports core.async operations.

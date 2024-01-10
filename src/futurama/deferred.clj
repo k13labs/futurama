@@ -1,6 +1,5 @@
 (ns ^:no-doc futurama.deferred
-  (:require [clojure.core.async :refer [take!]]
-            [clojure.core.async.impl.protocols :as impl]
+  (:require [clojure.core.async.impl.protocols :as impl]
             [clojure.core.async.impl.channels :refer [box]]
             [futurama.util :as u]
             [manifold.deferred :as d])
@@ -17,17 +16,7 @@
                              (.unlock handler)
                              take-cb))]
       (when-let [cb (commit-handler)]
-        (d/on-realized d
-                       (fn [val]
-                         (if (u/instance-satisfies? impl/ReadPort val)
-                           (take! val (fn do-read
-                                        [val]
-                                        (if (u/instance-satisfies? impl/ReadPort val)
-                                          (take! val do-read)
-                                          (cb val))))
-                           (cb val)))
-                       (fn [ex]
-                         (cb ex)))
+        (d/on-realized d (u/async-reader-handler cb) cb)
         nil)))
   impl/WritePort
   (put! [d val handler]

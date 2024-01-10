@@ -280,7 +280,7 @@
     (is (false? (async? "no"))))
   (testing "raw value handling - !<!"
     (let [v {:foo "bar"}]
-      (is (= v (!<! v)))))
+      (is (= v (!<!! (async (!<! v)))))))
   (testing "raw value handling - !<!!"
     (let [v {:foo "bar"}]
       (is (= v (!<!! v)))))

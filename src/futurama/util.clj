@@ -1,5 +1,8 @@
 (ns ^:no-doc futurama.util
-  (:refer-clojure :exclude [satisfies? find-protocol-impl]))
+  (:refer-clojure :exclude [satisfies? find-protocol-impl])
+  (:require [clojure.core.async :as async]
+            [clojure.core.async.impl.protocols :as impl])
+  (:import [java.util.concurrent.locks Lock]))
 
 (defn- super-chain [^Class c]
   (when c
@@ -37,3 +40,13 @@
   [protocol x]
   (or (boolean (find-protocol-impl-from-object protocol x))
       (class-satisfies? protocol (class x))))
+
+(defn- async-reader-handler*
+  [cb val]
+  (if (instance-satisfies? impl/ReadPort val)
+    (async/take! val (partial async-reader-handler* cb))
+    (cb val)))
+
+(defn async-reader-handler
+  [cb]
+  (partial async-reader-handler* cb))
