@@ -15,6 +15,7 @@
             CompletionException
             ExecutionException
             ExecutorService
+            ForkJoinPool
             Executors
             Future]
            [java.util.concurrent.locks Lock]
@@ -30,11 +31,6 @@
   ([n]
    (Executors/newFixedThreadPool n)))
 
-(defonce
-  ^{:doc "Default ExecutorService used, corresponds with a FixedThreadPool as many threads as available processors."}
-  default-pool
-  (delay (fixed-threadpool)))
-
 (defmacro with-pool
   "Utility macro which binds *thread-pool* to the supplied pool and then evaluates the `body`."
   [pool & body]
@@ -44,7 +40,7 @@
 (defn dispatch
   "dispatch the function by submitting it to the `*thread-pool*`"
   ^Future [^Runnable f]
-  (let [^ExecutorService pool (or *thread-pool* @default-pool)]
+  (let [^ExecutorService pool (or *thread-pool* (ForkJoinPool/commonPool))]
     (.submit ^ExecutorService pool ^Runnable f)))
 
 (defn unwrap-exception
@@ -99,7 +95,7 @@
 
 (defmacro completable-future
   "Asynchronously invokes the body inside a completable future, preserves the current thread binding frame,
-  using by default the `default-pool`, the pool used can be specified via `*thread-pool*` binding."
+  using by default the `ForkJoinPool/commonPool`, the pool used can be specified via `*thread-pool*` binding."
   ^CompletableFuture [& body]
   `(let [^CompletableFuture res-fut# (CompletableFuture.)] ;;; this is the CompletableFuture being returned
      (state/push-item res-fut#
