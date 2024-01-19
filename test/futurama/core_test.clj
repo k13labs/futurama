@@ -1,6 +1,6 @@
 (ns futurama.core-test
   (:require [clojure.test :refer [deftest testing is]]
-            [futurama.core :refer [!<!! !<! !<!* with-pool
+            [futurama.core :refer [!<!! !<! !<!* <!* with-pool
                                    async async-> async->> async?
                                    async-future async-deferred
                                    async-for async-map async-reduce
@@ -323,7 +323,7 @@
     (<!!
       (async
         (is (= (range 1 11)
-               (!<!*
+               (<!*
                  (for [n (range 10)]
                    (async (inc n)))))))))
   (testing "sequential collection non-blocking take - !<!*"
