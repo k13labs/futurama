@@ -41,24 +41,24 @@
   (testing "nested blocking take - !<!!"
     (is (= {:foo "bar"}
            (!<!! (async
-                   (go
-                     (CompletableFuture/completedFuture
-                       (completable-future
-                         (go
-                           (<! (timeout 50))
-                           (let [d (d/deferred)]
-                             (>! d {:foo "bar"})
-                             d))))))))))
+                  (go
+                    (CompletableFuture/completedFuture
+                     (completable-future
+                      (go
+                        (<! (timeout 50))
+                        (let [d (d/deferred)]
+                          (>! d {:foo "bar"})
+                          d))))))))))
   (testing "nested non-blocking take - !<!"
     (<!!
-      (async
-        (is (= {:foo "bar"}
-               (!<! (async
-                      (go
-                        (CompletableFuture/completedFuture
-                          (completable-future
-                            (go
-                              (<! (timeout 50))
-                              (let [d (d/deferred)]
-                                (d/success! d {:foo "bar"})
-                                d)))))))))))))
+     (async
+      (is (= {:foo "bar"}
+             (!<! (async
+                   (go
+                     (CompletableFuture/completedFuture
+                      (completable-future
+                       (go
+                         (<! (timeout 50))
+                         (let [d (d/deferred)]
+                           (d/success! d {:foo "bar"})
+                           d)))))))))))))

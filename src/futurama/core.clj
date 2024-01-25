@@ -524,9 +524,9 @@
 
 (defn- async-do-reduce*
   "internal reducer function to work with async args"
-  [f v x]
+  [f & args]
   (async
-   (f (!<! v) (!<! x))))
+   (apply f (!<!* args))))
 
 (defn async-reduce
   "Like core/reduce except, when init is not provided, (f) is used, and async results are read with !<!."
