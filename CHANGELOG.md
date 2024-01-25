@@ -1,5 +1,11 @@
 This is a history of changes to k13labs/futurama
 
+# 0.6.6
+* fix arity problem with async-reduce reducer
+
+# 0.6.5
+* change default thread pool to ForkJoinPool/commonPool
+
 # 0.6.4
 * Create <! <!! and <!* version of take macros which do not recursive read.
 * Only !<!, !<!! and !<!* explicitly recursive read from channels now, to optimize things.
