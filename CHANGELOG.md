@@ -1,5 +1,8 @@
 This is a history of changes to k13labs/futurama
 
+# 0.6.7
+* fix not calling realized? when not IPending
+
 # 0.6.6
 * fix arity problem with async-reduce reducer
 
