@@ -9,7 +9,7 @@
             [futurama.state :as state]
             [futurama.deferred]
             [manifold.deferred :as d])
-  (:import [clojure.lang Var IDeref IFn]
+  (:import [clojure.lang Var IDeref IPending IFn]
            [java.util.concurrent
             CompletableFuture
             CompletionException
@@ -122,6 +122,10 @@
                         res-fut#))))
 
 (extend-type Future
+  proto/AsyncPending
+  (realized? [fut]
+    (.isDone ^Future fut))
+
   proto/AsyncCancellable
   (cancel [this]
     (future-cancel this))
@@ -139,7 +143,7 @@
                              take-cb))]
       (when-let [cb (commit-handler)]
         (cond
-          (realized? fut)
+          (proto/realized? fut)
           (let [val (try
                       (.get ^Future fut)
                       (catch Throwable e
@@ -167,12 +171,18 @@
 
   impl/Channel
   (close! [fut]
-    (when-not (realized? fut)
+    (when-not (proto/realized? fut)
       (future-cancel ^Future fut)))
   (closed? [fut]
-    (realized? ^Future fut)))
+    (proto/realized? ^Future fut)))
 
 (extend-type IDeref
+  proto/AsyncPending
+  (realized? [ref]
+    (if (instance? IPending ref)
+      (realized? ref)
+      true))
+
   impl/ReadPort
   (take! [ref handler]
     (let [^IDeref ref ref
@@ -184,7 +194,7 @@
                              take-cb))]
       (when-let [cb (commit-handler)]
         (cond
-          (realized? ref)
+          (proto/realized? ref)
           (let [val (try
                       (deref ref)
                       (catch Throwable e
@@ -215,9 +225,13 @@
     (when (instance? IFn ref)
       (ref nil)))
   (closed? [ref]
-    (realized? ref)))
+    (proto/realized? ref)))
 
 (extend-type CompletableFuture
+  proto/AsyncPending
+  (realized? [fut]
+    (.isDone ^CompletableFuture fut))
+
   proto/AsyncCancellable
   (cancel [this]
     (future-cancel this))

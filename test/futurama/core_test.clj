@@ -363,9 +363,10 @@
                           (>! c {:foo "bar"})
                           (delay
                             (future
-                              (let [p (promise)]
-                                (deliver p c)
-                                p)))))))))))))
+                              (atom
+                               (let [p (promise)]
+                                 (deliver p c)
+                                 p))))))))))))))
   (testing "nested non-blocking take - !<!"
     (<!!
      (async
