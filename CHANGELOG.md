@@ -1,5 +1,9 @@
 This is a history of changes to k13labs/futurama
 
+# 1.0.0
+* separate ReadPort and WritePort impl into its own namespace
+* initial major release of library with updated protocols impl and same API
+
 # 0.6.7
 * fix not calling realized? when not IPending
 
