@@ -7,7 +7,7 @@
                                    async-some async-every?
                                    async-prewalk async-postwalk
                                    async-cancel! async-cancelled?
-                                   completable-future]]
+                                   completable-future fixed-threadpool]]
             [clojure.core.async :refer [go timeout put! take! <! >! <!!] :as a]
             [criterium.core :refer [report-result
                                     quick-benchmark
@@ -31,7 +31,7 @@
 
 (def test-pool
   (delay
-    (Executors/newSingleThreadExecutor)))
+    (fixed-threadpool)))
 
 (deftest test-completable-future
   (testing "basic completable-future test"
@@ -407,7 +407,7 @@
             ;;; via Deref it is wrapped in an ExecutionException
            (catch ExecutionException ee
              (throw (ex-cause ee)))))))
-  (testing "throws async exception on blocking deref from async! with completable future - @"
+  (testing "throws async exception on blocking deref from async! with deferred - @"
     (is (thrown-with-msg?
          ExceptionInfo #"foobar"
          (try

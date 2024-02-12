@@ -1,15 +1,14 @@
 (ns futurama.core
   (:require [clojure.core.async :as async]
-            [clojure.core.async.impl.protocols :as impl]
+            [clojure.core.async.impl.protocols :as core-impl]
             [clojure.core.async.impl.channels :refer [box]]
             [clojure.core.async.impl.ioc-macros :as ioc]
             [clojure.core.reducers :as r]
-            [futurama.protocols :as proto]
+            [futurama.impl :as impl]
             [futurama.util :as u]
             [futurama.state :as state]
-            [futurama.deferred]
             [manifold.deferred :as d])
-  (:import [clojure.lang Var IDeref IPending IFn]
+  (:import [clojure.lang Var IDeref IPending IFn IAtom IRef]
            [java.util.concurrent
             CompletableFuture
             CompletionException
@@ -19,7 +18,8 @@
             Executors
             Future]
            [java.util.concurrent.locks Lock]
-           [java.util.function Function BiConsumer]))
+           [java.util.function Function BiConsumer]
+           [manifold.deferred Deferred]))
 
 (def ^:dynamic *thread-pool* nil)
 
@@ -62,13 +62,13 @@
 (defn async-cancellable?
   "Determines if v instance-satisfies? `AsyncCancellable`"
   [v]
-  (u/instance-satisfies? proto/AsyncCancellable v))
+  (u/instance-satisfies? impl/AsyncCancellable v))
 
 (defn async-cancel!
   "Cancels the async item."
   [item]
   (let [proto-cancel (when (async-cancellable? item)
-                       (proto/cancel item))
+                       (impl/cancel! item))
         stack-cancel (state/set-value! item :cancelled true)]
     (or proto-cancel stack-cancel false)))
 
@@ -84,14 +84,20 @@
        false))
   ([item]
    (or (when (async-cancellable? item)
-         (proto/cancelled? item))
+         (impl/cancelled? item))
        (state/get-value item :cancelled)
        false)))
+
+(defn async-completed?
+  "Checks if the provided `AsyncCompletableReader` instance is completed?"
+  [x]
+  (when (u/instance-satisfies? impl/AsyncCompletableReader x)
+    (impl/completed? x)))
 
 (defn async?
   "returns true if v instance-satisfies? core.async's `ReadPort`"
   ^Boolean [v]
-  (u/instance-satisfies? impl/ReadPort v))
+  (u/instance-satisfies? core-impl/ReadPort v))
 
 (defmacro completable-future
   "Asynchronously invokes the body inside a completable future, preserves the current thread binding frame,
@@ -122,180 +128,164 @@
                         res-fut#))))
 
 (extend-type Future
-  proto/AsyncPending
-  (realized? [fut]
+  core-impl/ReadPort
+  (take! [x handler]
+    (impl/async-read-port-take! x handler))
+
+  impl/AsyncCancellable
+  (cancel! [fut]
+    (future-cancel fut))
+  (cancelled? [fut]
+    (future-cancelled? fut))
+
+  impl/AsyncCompletableReader
+  (get! [fut]
+    (try
+      (.get ^Future fut)
+      (catch Throwable e
+        e)))
+  (completed? [fut]
     (.isDone ^Future fut))
+  (on-complete [fut f]
+    (async/thread
+      (let [r (impl/get! fut)]
+        (f r))))
 
-  proto/AsyncCancellable
-  (cancel [this]
-    (future-cancel this))
-  (cancelled? [this]
-    (future-cancelled? this))
+  core-impl/Channel
+  (close! [x]
+    (when-not (async-completed? x)
+      (async-cancel! x)))
+  (closed? [x]
+    (async-completed? x)))
 
-  impl/ReadPort
-  (take! [fut handler]
-    (let [^Future fut fut
-          ^Lock handler handler
-          commit-handler (fn do-commit []
-                           (.lock handler)
-                           (let [take-cb (and (impl/active? handler) (impl/commit handler))]
-                             (.unlock handler)
-                             take-cb))]
-      (when-let [cb (commit-handler)]
-        (cond
-          (proto/realized? fut)
-          (let [val (try
-                      (.get ^Future fut)
-                      (catch Throwable e
-                        (unwrap-exception e)))]
-            (box val))
+(extend-protocol impl/AsyncCompletableWriter
+  IFn
+  (complete! [f v]
+    (boolean (f v)))
 
-          :else
-          (do
-            (async/thread
-              (let [[val ex]
-                    (try
-                      [(.get ^Future fut) nil]
-                      (catch Throwable e
-                        [nil e]))]
-                (cond
-                  (some? val)
-                  (cb val)
+  IAtom
+  (complete! [a v]
+    (reset! a v)
+    true)
 
-                  (some? ex)
-                  (cb ex)
+  IRef
+  (complete! [a v]
+    (dosync
+     (ref-set a v))
+    true))
 
-                  :else
-                  (cb nil))))
-            nil)))))
+(extend-protocol core-impl/WritePort
+  IFn
+  (put! [x val handler]
+    (impl/async-write-port-put! x val handler))
 
-  impl/Channel
-  (close! [fut]
-    (when-not (proto/realized? fut)
-      (future-cancel ^Future fut)))
-  (closed? [fut]
-    (proto/realized? ^Future fut)))
+  IAtom
+  (put! [x val handler]
+    (impl/async-write-port-put! x val handler))
+
+  IRef
+  (put! [x val handler]
+    (impl/async-write-port-put! x val handler)))
 
 (extend-type IDeref
-  proto/AsyncPending
-  (realized? [ref]
+  core-impl/ReadPort
+  (take! [x handler]
+    (impl/async-read-port-take! x handler))
+
+  impl/AsyncCompletableReader
+  (get! [ref]
+    (try
+      (deref ref)
+      (catch Throwable e
+        e)))
+  (completed? [ref]
     (if (instance? IPending ref)
       (realized? ref)
       true))
+  (on-complete [ref f]
+    (async/thread
+      (let [r (impl/get! ref)]
+        (f r))))
 
-  impl/ReadPort
-  (take! [ref handler]
-    (let [^IDeref ref ref
-          ^Lock handler handler
-          commit-handler (fn do-commit []
-                           (.lock handler)
-                           (let [take-cb (and (impl/active? handler) (impl/commit handler))]
-                             (.unlock handler)
-                             take-cb))]
-      (when-let [cb (commit-handler)]
-        (cond
-          (proto/realized? ref)
-          (let [val (try
-                      (deref ref)
-                      (catch Throwable e
-                        (unwrap-exception e)))]
-            (box val))
-
-          :else
-          (do
-            (async/thread
-              (let [[val ex]
-                    (try
-                      [(deref ref) nil]
-                      (catch Throwable e
-                        [nil e]))]
-                (cond
-                  (some? val)
-                  (cb val)
-
-                  (some? ex)
-                  (cb ex)
-
-                  :else
-                  (cb nil))))
-            nil)))))
-
-  impl/Channel
+  core-impl/Channel
   (close! [ref]
     (when (instance? IFn ref)
       (ref nil)))
   (closed? [ref]
-    (proto/realized? ref)))
+    (impl/completed? ref)))
 
 (extend-type CompletableFuture
-  proto/AsyncPending
-  (realized? [fut]
-    (.isDone ^CompletableFuture fut))
+  core-impl/ReadPort
+  (take! [x handler]
+    (impl/async-read-port-take! x handler))
 
-  proto/AsyncCancellable
-  (cancel [this]
+  core-impl/WritePort
+  (put! [x val handler]
+    (impl/async-write-port-put! x val handler))
+
+  impl/AsyncCancellable
+  (cancel! [this]
     (future-cancel this))
   (cancelled? [this]
     (future-cancelled? this))
 
-  impl/ReadPort
-  (take! [fut handler]
-    (let [^CompletableFuture fut fut
-          ^Lock handler handler
-          commit-handler (fn do-commit []
-                           (.lock handler)
-                           (let [take-cb (and (impl/active? handler) (impl/commit handler))]
-                             (.unlock handler)
-                             take-cb))]
-      (when-let [cb (commit-handler)]
-        (if (.isDone fut)
-          (let [val (try
-                      (.getNow fut nil)
-                      (catch Throwable e
-                        (unwrap-exception e)))]
-            (box val))
-          (do
-            (let [^BiConsumer invoke-cb (reify BiConsumer
-                                          (accept [_ val ex]
-                                            (cond
-                                              (some? val)
-                                              (cb val)
+  impl/AsyncCompletableReader
+  (get! [fut]
+    (try
+      (.get ^CompletableFuture fut)
+      (catch Throwable e
+        e)))
+  (completed? [fut]
+    (.isDone ^CompletableFuture fut))
+  (on-complete [fut f]
+    (let [^BiConsumer invoke-cb (reify BiConsumer
+                                  (accept [_ val ex]
+                                    (f (or ex val))))]
+      (.whenComplete ^CompletableFuture fut ^BiConsumer invoke-cb)))
 
-                                              (some? ex)
-                                              (cb ex)
+  impl/AsyncCompletableWriter
+  (complete! [fut v]
+    (if (instance? Throwable v)
+      (.completeExceptionally ^CompletableFuture fut ^Throwable v)
+      (.complete ^CompletableFuture fut v)))
 
-                                              :else
-                                              (cb nil))))]
-              (.whenComplete ^CompletableFuture fut ^BiConsumer invoke-cb))
-            nil)))))
-  impl/WritePort
-  (put! [fut val handler]
-    (when (nil? val)
-      (throw (IllegalArgumentException. "Can't put nil on an async thing, close it instead!")))
-    (let [^CompletableFuture fut fut
-          ^Lock handler handler]
-      (if (.isDone fut)
-        (do
-          (.lock handler)
-          (when (impl/active? handler)
-            (impl/commit handler))
-          (.unlock handler)
-          (box false))
-        (do
-          (.lock handler)
-          (when (impl/active? handler)
-            (impl/commit handler))
-          (.unlock handler)
-          (box
-           (if (instance? Throwable val)
-             (.completeExceptionally fut ^Throwable val)
-             (.complete fut val)))))))
-
-  impl/Channel
+  core-impl/Channel
   (close! [fut]
     (.complete ^CompletableFuture fut nil))
   (closed? [fut]
     (.isDone ^CompletableFuture fut)))
+
+(extend-type Deferred
+  core-impl/ReadPort
+  (take! [x handler]
+    (impl/async-read-port-take! x handler))
+
+  core-impl/WritePort
+  (put! [x val handler]
+    (impl/async-write-port-put! x val handler))
+
+  impl/AsyncCompletableReader
+  (get! [dfd]
+    (try
+      (deref dfd)
+      (catch Throwable e
+        e)))
+  (completed? [dfd]
+    (d/realized? dfd))
+  (on-complete [dfd f]
+    (d/on-realized dfd f f))
+
+  impl/AsyncCompletableWriter
+  (complete! [dfd v]
+    (if (instance? Throwable v)
+      (d/error! dfd v)
+      (d/success! dfd v)))
+
+  core-impl/Channel
+  (close! [dfd]
+    (d/success! dfd nil))
+  (closed? [dfd]
+    (d/realized? dfd)))
 
 (defmacro async!
   "Asynchronously executes the body, returning `port` immediately to the
@@ -396,12 +386,12 @@
     ~@body))
 
 (deftype AsyncReader [val]
-  impl/ReadPort
+  core-impl/ReadPort
   (take! [_ handler]
     (let [^Lock handler handler
           commit-handler (fn do-commit []
                            (.lock handler)
-                           (let [take-cb (and (impl/active? handler) (impl/commit handler))]
+                           (let [take-cb (and (core-impl/active? handler) (core-impl/commit handler))]
                              (.unlock handler)
                              take-cb))]
       (when-let [cb (commit-handler)]
@@ -577,7 +567,7 @@
                       (async-some-call* result pred item)))]
        (loop [results (seq results)]
          (cond
-           (impl/closed? result)
+           (core-impl/closed? result)
            nil
 
            (nil? results)
@@ -606,7 +596,7 @@
                      (async-every-call* result pred item))]
        (loop [results (seq results)]
          (cond
-           (impl/closed? result)
+           (core-impl/closed? result)
            nil
 
            (nil? results)
