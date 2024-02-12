@@ -59,6 +59,8 @@
     (throw (unwrap-exception v))
     v))
 
+(def ^:no-doc rte rethrow-exception)
+
 (defn async-cancellable?
   "Determines if v instance-satisfies? `AsyncCancellable`"
   [v]
@@ -406,6 +408,8 @@
   [x]
   (AsyncReader. x))
 
+(def ^:no-doc rdr ->async-reader)
+
 (defmacro <!
   "An improved macro version of <!, which also rethrows exceptions returned over the channel.
   Must be called INSIDE a (go ...) or (async ...) block.
@@ -414,7 +418,7 @@
   - Will throw if an Exception is taken from port.
   - Will return the raw value if it is not a ReadPort"
   [v]
-  `(rethrow-exception (async/<! ~v)))
+  `(rte (async/<! ~v)))
 
 (defmacro <!*
   "Like <! but works with collections of async values"
@@ -433,7 +437,7 @@
   - Will throw if a Exception is taken from port.
   - Will return the raw value if it is not a ReadPort"
   [v]
-  `(rethrow-exception (async/<!! ~v)))
+  `(rte (async/<!! ~v)))
 
 (defmacro !<!
   "An improved macro version of <!, which also rethrows exceptions returned over the channel.
@@ -444,7 +448,7 @@
   - Will return the raw value if it is not a ReadPort
   - Will fully read through any async result returned"
   [v]
-  `(<! (->async-reader ~v)))
+  `(<! (rdr ~v)))
 
 (defmacro !<!*
   "Like !<! but works with collections of async values"
@@ -464,7 +468,7 @@
   - Will return the raw value if it is not a ReadPort
   - Will fully read through any async result returned"
   [v]
-  `(<!! (->async-reader ~v)))
+  `(<!! (rdr ~v)))
 
 (defmacro async-for
   "works like a for macro, but supports core.async operations.

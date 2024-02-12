@@ -308,6 +308,11 @@
       (put! f v)
       (put! f {:foo "baz"})
       (is (= v @f))))
+  (testing "async put! nested test"
+    (let [^CompletableFuture f (CompletableFuture.)
+          v {:foo "bar"}]
+      (put! f (CompletableFuture/completedFuture v))
+      (is (= v @f))))
   (testing "async take! test"
     (let [^CompletableFuture f (CompletableFuture.)
           v {:foo "bar"}
@@ -315,6 +320,12 @@
       (take! f (partial deliver p))
       (.complete f v)
       (is (= v @p))))
+  (testing "async take! nested test"
+    (let [^CompletableFuture f (CompletableFuture/completedFuture
+                                (CompletableFuture/completedFuture {:foo "bar"}))
+          v {:foo "bar"}
+          r (<!! f)]
+      (is (= v r))))
   (testing "bindings test blocking - !<!!"
     (binding [*test-val1* 100]
       (with-redefs [test-val2 200]

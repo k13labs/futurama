@@ -2,6 +2,7 @@
   (:refer-clojure :exclude [realized?])
   (:require [clojure.core.async.impl.protocols :as core-impl]
             [clojure.core.async.impl.channels :refer [box]]
+            [clojure.core.async :refer [take!]]
             [futurama.util :as u])
   (:import
    [java.util.concurrent.locks Lock]))
@@ -31,7 +32,11 @@
       (cond
         (completed? x)
         (let [r (get! x)]
-          (box r))
+          (if (u/instance-satisfies? core-impl/ReadPort r)
+            (do
+              (take! r (u/async-reader-handler cb))
+              nil)
+            (box r)))
 
         :else
         (do
@@ -56,5 +61,9 @@
         (when (core-impl/active? handler)
           (core-impl/commit handler))
         (.unlock handler)
-        (box
-         (complete! x val))))))
+        (if (u/instance-satisfies? core-impl/ReadPort val)
+          (do
+            (take! val (u/async-reader-handler (partial complete! x)))
+            (box false))
+          (box
+           (complete! x val)))))))

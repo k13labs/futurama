@@ -1,5 +1,9 @@
 This is a history of changes to k13labs/futurama
 
+# 1.0.1
+* enhance reader and writer impl to better support nested async values
+* shorten class names for async reader and rethrow fns used inside macro
+
 # 1.0.0
 * separate ReadPort and WritePort impl into its own namespace
 * initial major release of library with updated protocols impl and same API
