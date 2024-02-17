@@ -46,7 +46,7 @@
   ^Deferred []
   (d/deferred))
 
-(def ^:dynamic *async-factory* async-future-factory)
+(def ^:dynamic *async-factory* async-channel-factory)
 
 (defn set-async-factory!
   "alters the root binding of *async-factory* to be equal to `async-factory-fn`"
