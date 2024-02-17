@@ -1,5 +1,9 @@
 This is a history of changes to k13labs/futurama
 
+# 1.0.2
+* minimize use of weak references, only pushing one to the global state when an async item is cancelled
+* synchronize global state for cancellations using a reentrant readwrite lock instead of default lock
+
 # 1.0.1
 * enhance reader and writer impl to better support nested async values
 * shorten class names for async reader and rethrow fns used inside macro
