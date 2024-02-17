@@ -9,6 +9,7 @@
             [futurama.state :as state]
             [manifold.deferred :as d])
   (:import [clojure.lang Var IDeref IPending IFn IAtom IRef]
+           [clojure.core.async.impl.channels ManyToManyChannel]
            [java.util.concurrent
             CompletableFuture
             CompletionException
@@ -21,7 +22,66 @@
            [java.util.function Function BiConsumer]
            [manifold.deferred Deferred]))
 
+(def ^:const ASYNC_CANCELLED ::cancelled)
+
 (def ^:dynamic *thread-pool* nil)
+
+(defn async-channel-factory
+  "Creates a core async channel of size 1"
+  ^ManyToManyChannel []
+  (async/chan 1))
+
+(defn async-future-factory
+  "Creates a new CompletableFuture"
+  ^CompletableFuture []
+  (CompletableFuture.))
+
+(defn async-promise-factory
+  "Creates a new clojure Promise"
+  []
+  (promise))
+
+(defn async-deferred-factory
+  "Creates a new Manifold Deferred"
+  ^Deferred []
+  (d/deferred))
+
+(def ^:dynamic *async-factory* async-future-factory)
+
+(defn set-async-factory!
+  "alters the root binding of *async-factory* to be equal to `async-factory-fn`"
+  [async-factory-fn]
+  (alter-var-root #'*async-factory* (constantly async-factory-fn)))
+
+(defmacro with-async-factory
+  "temporarily binds *async-factory* to the speficied async-factory-fn and executes body."
+  [async-factory-fn & body]
+  `(binding [*async-factory* ~async-factory-fn]
+     ~@body))
+
+(defmacro with-async-future-factory
+  "temporarily binds *async-factory* to the speficied `async-future-factory` and executes body."
+  [& body]
+  `(with-async-factory async-future-factory
+     ~@body))
+
+(defmacro with-async-channel-factory
+  "temporarily binds *async-factory* to the speficied `async-channel-factory` and executes body."
+  [& body]
+  `(with-async-factory async-channel-factory
+     ~@body))
+
+(defmacro with-async-promise-factory
+  "temporarily binds *async-factory* to the speficied `async-promise-factory` and executes body."
+  [& body]
+  `(with-async-factory async-promise-factory
+     ~@body))
+
+(defmacro with-async-deferred-factory
+  "temporarily binds *async-factory* to the speficied `async-deferred-factory` and executes body."
+  [& body]
+  `(with-async-factory async-deferred-factory
+     ~@body))
 
 (defn fixed-threadpool
   "Creates a fixed-threadpool, by default uses the number of available processors."
@@ -71,7 +131,7 @@
   [item]
   (let [proto-cancel (when (async-cancellable? item)
                        (impl/cancel! item))
-        stack-cancel (state/set-value! item :cancelled true)]
+        stack-cancel (state/set-global-state! item ASYNC_CANCELLED)]
     (or proto-cancel stack-cancel false)))
 
 (defn async-cancelled?
@@ -82,12 +142,12 @@
          (.. (Thread/currentThread)
              (interrupt))
          true)
-       (some async-cancelled? (state/get-dynamic-items))
+       (some async-cancelled? state/*items*)
        false))
   ([item]
    (or (when (async-cancellable? item)
          (impl/cancelled? item))
-       (state/get-value item :cancelled)
+       (= (state/get-global-state item) ASYNC_CANCELLED)
        false)))
 
 (defn async-completed?
@@ -342,11 +402,30 @@
   go block threads, causing all go block processing to stop. This includes
   core.async blocking ops (those ending in !!) and other blocking IO.
 
+  Returns an instance of the default *async-factory* which will receive the result of the body when
+  completed; the pool used can be specified via `*thread-pool*` binding."
+  [& body]
+  `(async!
+    (*async-factory*)
+    ~@body))
+
+(defmacro async-channel
+  "Asynchronously executes the body, returning immediately to the
+  calling thread. Additionally, any visible calls to !<!, <!, >! and alt!/alts!
+  channel operations within the body will block (if necessary) by
+  'parking' the calling thread rather than tying up an OS thread.
+  Upon completion of the operation, the body will be resumed.
+
+  async blocks should not (either directly or indirectly) perform operations
+  that may block indefinitely. Doing so risks depleting the fixed pool of
+  go block threads, causing all go block processing to stop. This includes
+  core.async blocking ops (those ending in !!) and other blocking IO.
+
   Returns a channel which will receive the result of the body when
   completed; the pool used can be specified via `*thread-pool*` binding."
   [& body]
   `(async!
-    (async/chan 1)
+    (async-channel-factory)
     ~@body))
 
 (defmacro async-future
@@ -365,7 +444,7 @@
   completed; the pool used can be specified via `*thread-pool*` binding."
   [& body]
   `(async!
-    (CompletableFuture.)
+    (async-future-factory)
     ~@body))
 
 (defmacro async-deferred
@@ -384,7 +463,26 @@
   completed; the pool used can be specified via `*thread-pool*` binding."
   [& body]
   `(async!
-    (d/deferred)
+    (async-deferred-factory)
+    ~@body))
+
+(defmacro async-promise
+  "Asynchronously executes the body, returning immediately to the
+  calling thread. Additionally, any visible calls to !<!, <!, >! and alt!/alts!
+  channel operations within the body will block (if necessary) by
+  'parking' the calling thread rather than tying up an OS thread.
+  Upon completion of the operation, the body will be resumed.
+
+  async blocks should not (either directly or indirectly) perform operations
+  that may block indefinitely. Doing so risks depleting the fixed pool of
+  go block threads, causing all go block processing to stop. This includes
+  core.async blocking ops (those ending in !!) and other blocking IO.
+
+  Returns a clojure Promise which will receive the result of the body when
+  completed; the pool used can be specified via `*thread-pool*` binding."
+  [& body]
+  `(async!
+    (async-promise-factory)
     ~@body))
 
 (deftype AsyncReader [val]

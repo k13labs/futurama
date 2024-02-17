@@ -61,9 +61,5 @@
         (when (core-impl/active? handler)
           (core-impl/commit handler))
         (.unlock handler)
-        (if (u/instance-satisfies? core-impl/ReadPort val)
-          (do
-            (take! val (u/async-reader-handler (partial complete! x)))
-            (box false))
-          (box
-           (complete! x val)))))))
+        (box
+         (complete! x val))))))

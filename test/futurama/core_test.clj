@@ -1,19 +1,34 @@
 (ns futurama.core-test
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [futurama.core :refer [!<!! !<! !<!* <!* with-pool
                                    async async-> async->> async?
-                                   async-future async-deferred
+                                   async-future async-channel async-deferred
                                    async-for async-map async-reduce
                                    async-some async-every?
                                    async-prewalk async-postwalk
                                    async-cancel! async-cancelled?
-                                   completable-future fixed-threadpool]]
+                                   completable-future fixed-threadpool] :as f]
             [clojure.core.async :refer [go timeout put! take! <! >! <!!] :as a]
             [criterium.core :refer [report-result
                                     quick-benchmark
                                     with-progress-reporting]])
-  (:import [java.util.concurrent Executors CompletableFuture ExecutionException]
+  (:import [java.util.concurrent CompletableFuture ExecutionException]
            [clojure.lang ExceptionInfo]))
+
+(defn async-fixture
+  [f]
+  (f/set-async-factory! f/async-future-factory)
+  (f)
+  (f/with-async-future-factory
+    (f))
+  (f/with-async-channel-factory
+    (f))
+  (f/with-async-promise-factory
+    (f))
+  (f/with-async-deferred-factory
+    (f)))
+
+(use-fixtures :once async-fixture)
 
 (def ^:dynamic *test-val1* nil)
 (def test-val2 nil)
@@ -52,6 +67,24 @@
     (let [a (promise)
           s (atom 0)
           f (completable-future
+             (try
+               (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
+                 (Thread/sleep 10)
+                 (println "future looping..." (swap! s inc)))
+               (println "ended future looping.")
+               (deliver a true)
+               (catch Throwable e
+                 (println "interrupted looping by:" (type e))
+                 (deliver a true))))]
+      (go
+        (<! (timeout 100))
+        (async-cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
+      (is (true? @a))
+      (is (true? (async-cancelled? f)))))
+  (testing "cancellable async-channel block is interrupted test"
+    (let [a (promise)
+          s (atom 0)
+          f (async-channel
              (try
                (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
                  (Thread/sleep 10)
@@ -308,11 +341,6 @@
       (put! f v)
       (put! f {:foo "baz"})
       (is (= v @f))))
-  (testing "async put! nested test"
-    (let [^CompletableFuture f (CompletableFuture.)
-          v {:foo "bar"}]
-      (put! f (CompletableFuture/completedFuture v))
-      (is (= v @f))))
   (testing "async take! test"
     (let [^CompletableFuture f (CompletableFuture.)
           v {:foo "bar"}
@@ -414,6 +442,17 @@
            @(async-future
              (throw (ex-info "foobar" {}))
              ::result)
+            ;;; this is just necessary to test when an exception is thrown
+            ;;; via Deref it is wrapped in an ExecutionException
+           (catch ExecutionException ee
+             (throw (ex-cause ee)))))))
+  (testing "throws async exception on blocking deref from async! with completable future - @"
+    (is (thrown-with-msg?
+         ExceptionInfo #"foobar"
+         (try
+           (!<!! (async-channel
+                  (throw (ex-info "foobar" {}))
+                  ::result))
             ;;; this is just necessary to test when an exception is thrown
             ;;; via Deref it is wrapped in an ExecutionException
            (catch ExecutionException ee

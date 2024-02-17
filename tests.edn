@@ -1,5 +1,5 @@
 #kaocha/v1 {:capture-output?                 true
-            :kaocha/fail-fast?               true
+            :kaocha/fail-fast?               false
             :plugins                         [:kaocha.plugin/profiling
                                               :kaocha.plugin/print-invocations
                                               :kaocha.plugin/hooks
@@ -7,6 +7,7 @@
             :kaocha.hooks/pre-report         [futurama.test-setup/defuse-zero-assertions]
             :kaocha.plugin.preloads/ns-names [futurama.test-setup]
             :tests                           [{:id        :unit
+                                               :kaocha/fail-fast?               false
                                                :kaocha/source-paths             ["src"]
                                                :kaocha/test-paths               ["test"]
                                                :ns-patterns                     [".*"]}]}
