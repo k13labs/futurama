@@ -1,5 +1,5 @@
 {:paths ["src" "resources"]
- :deps {org.clojure/clojure {:mvn/version "1.10.3"}
+ :deps {org.clojure/clojure {:mvn/version "1.11.2"}
         org.clojure/core.async {:mvn/version "1.6.681"}
         manifold/manifold {:mvn/version "0.4.1"}}
 
