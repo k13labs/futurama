@@ -1,5 +1,8 @@
 This is a history of changes to k13labs/futurama
 
+# 1.0.3
+* upgrade clojure version to 1.11.2
+
 # 1.0.2
 * minimize use of weak references, only pushing one to the global state when an async item is cancelled
 * synchronize global state for cancellations using a reentrant readwrite lock instead of default lock
