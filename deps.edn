@@ -1,7 +1,7 @@
 {:paths ["src" "resources"]
- :deps {org.clojure/clojure {:mvn/version "1.11.2"}
+ :deps {org.clojure/clojure {:mvn/version "1.11.4"}
         org.clojure/core.async {:mvn/version "1.6.681"}
-        manifold/manifold {:mvn/version "0.4.1"}}
+        manifold/manifold {:mvn/version "0.4.3"}}
 
  ;for more examples of aliases see: https://github.com/seancorfield/dot-clojure
  :aliases

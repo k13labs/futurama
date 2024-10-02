@@ -24,7 +24,7 @@
 
 (deftype JavaFunction [f]
   Function
-  (apply [this a]
+  (apply [_ a]
     (f a)))
 
 (deftype JavaBiConsumer [f]

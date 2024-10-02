@@ -1,5 +1,9 @@
 This is a history of changes to k13labs/futurama
 
+# 1.0.4
+* replace uses of Reify with JavaFunction and JavaBiConsumer types
+* upgrade clojure version to 1.11.4
+
 # 1.0.3
 * upgrade clojure version to 1.11.2
 
