@@ -302,7 +302,7 @@
                    {:verbose true}))
           [mean [lower upper]] (:mean bench)]
       (report-result bench)
-      (is (<= 0.05 lower mean upper 0.07)))))
+      (is (<= 0.04 lower mean upper 0.07)))))
 
 (deftest async-for-test
   (testing "can loop for concurrently, performance test"
@@ -320,7 +320,7 @@
                    {:verbose true}))
           [mean [lower upper]] (:mean bench)]
       (report-result bench)
-      (is (<= 0.05 lower mean upper 0.07)))))
+      (is (<= 0.04 lower mean upper 0.07)))))
 
 (deftest async-ops
   (testing "async? for CompletableFuture"

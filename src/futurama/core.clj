@@ -22,6 +22,16 @@
            [java.util.function Function BiConsumer]
            [manifold.deferred Deferred]))
 
+(deftype JavaFunction [f]
+  Function
+  (apply [_ a]
+    (f a)))
+
+(deftype JavaBiConsumer [f]
+  BiConsumer
+  (accept [_ a b]
+    (f a b)))
+
 (def ^:const ASYNC_CANCELLED ::cancelled)
 
 (def ^:dynamic *thread-pool* nil)
@@ -180,8 +190,8 @@
                                                    (finally
                                                      (Var/resetThreadBindingFrame thread-frame#))))) ;;; restore the original Thread's binding frame
                             ^Future fut# (dispatch fbody#)
-                            ^Function cancel# (reify Function
-                                                (apply [~'_ ~'_]
+                            ^Function cancel# (JavaFunction.
+                                                (fn [~'_]
                                                   (async-cancel! res-fut#)
                                                   (future-cancel fut#)))] ;;; submit the work to the pool and get the FutureTask doing the work
          ;;; if the CompletableFuture returns exceptionally
@@ -300,8 +310,8 @@
   (completed? [fut]
     (.isDone ^CompletableFuture fut))
   (on-complete [fut f]
-    (let [^BiConsumer invoke-cb (reify BiConsumer
-                                  (accept [_ val ex]
+    (let [^BiConsumer invoke-cb (JavaBiConsumer.
+                                  (fn [val ex]
                                     (f (or ex val))))]
       (.whenComplete ^CompletableFuture fut ^BiConsumer invoke-cb)))
 
@@ -382,8 +392,8 @@
                                                             (ioc/run-state-machine-wrapped state#)))
                               ^Future fut# (dispatch task#)]
                           (when (instance? CompletableFuture c#)
-                            (let [^Function cancel# (reify Function
-                                                      (apply [~'_ ~'_]
+                            (let [^Function cancel# (JavaFunction.
+                                                      (fn [~'_]
                                                         (async-cancel! c#)
                                                         (future-cancel fut#)))]
                               (.exceptionally ^CompletableFuture c#
