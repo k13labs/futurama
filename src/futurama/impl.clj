@@ -32,7 +32,7 @@
       (cond
         (completed? x)
         (let [r (get! x)]
-          (if (u/instance-satisfies? core-impl/ReadPort r)
+          (if (satisfies? core-impl/ReadPort r)
             (do
               (take! r (u/async-reader-handler cb))
               nil)
@@ -48,7 +48,7 @@
   (when (nil? val)
     (throw (IllegalArgumentException. "Can't put nil on an async thing, close it instead!")))
   (let [^Lock handler handler]
-    (if (and (u/instance-satisfies? AsyncCompletableReader x)
+    (if (and (satisfies? AsyncCompletableReader x)
              (completed? x))
       (do
         (.lock handler)

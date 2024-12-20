@@ -1,5 +1,8 @@
 This is a history of changes to k13labs/futurama
 
+# 1.0.5-SNAPSHOT
+* replace uses of instance-satisfies? with clojure.core/satisfies?.
+
 # 1.0.4
 * replace uses of Reify with JavaFunction and JavaBiConsumer types
 * upgrade clojure version to 1.11.4

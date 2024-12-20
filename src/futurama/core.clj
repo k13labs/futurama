@@ -132,9 +132,9 @@
 (def ^:no-doc rte rethrow-exception)
 
 (defn async-cancellable?
-  "Determines if v instance-satisfies? `AsyncCancellable`"
+  "Determines if v satisfies? `AsyncCancellable`"
   [v]
-  (u/instance-satisfies? impl/AsyncCancellable v))
+  (satisfies? impl/AsyncCancellable v))
 
 (defn async-cancel!
   "Cancels the async item."
@@ -163,13 +163,13 @@
 (defn async-completed?
   "Checks if the provided `AsyncCompletableReader` instance is completed?"
   [x]
-  (when (u/instance-satisfies? impl/AsyncCompletableReader x)
+  (when (satisfies? impl/AsyncCompletableReader x)
     (impl/completed? x)))
 
 (defn async?
-  "returns true if v instance-satisfies? core.async's `ReadPort`"
+  "returns true if v instance satisfies? core.async's `ReadPort`"
   ^Boolean [v]
-  (u/instance-satisfies? core-impl/ReadPort v))
+  (satisfies? core-impl/ReadPort v))
 
 (defmacro completable-future
   "Asynchronously invokes the body inside a completable future, preserves the current thread binding frame,
@@ -191,9 +191,9 @@
                                                      (Var/resetThreadBindingFrame thread-frame#))))) ;;; restore the original Thread's binding frame
                             ^Future fut# (dispatch fbody#)
                             ^Function cancel# (JavaFunction.
-                                                (fn [~'_]
-                                                  (async-cancel! res-fut#)
-                                                  (future-cancel fut#)))] ;;; submit the work to the pool and get the FutureTask doing the work
+                                               (fn [~'_]
+                                                 (async-cancel! res-fut#)
+                                                 (future-cancel fut#)))] ;;; submit the work to the pool and get the FutureTask doing the work
          ;;; if the CompletableFuture returns exceptionally
          ;;; then cancel the Future which is currently doing the work
                         (.exceptionally res-fut# cancel#)
@@ -311,8 +311,8 @@
     (.isDone ^CompletableFuture fut))
   (on-complete [fut f]
     (let [^BiConsumer invoke-cb (JavaBiConsumer.
-                                  (fn [val ex]
-                                    (f (or ex val))))]
+                                 (fn [val ex]
+                                   (f (or ex val))))]
       (.whenComplete ^CompletableFuture fut ^BiConsumer invoke-cb)))
 
   impl/AsyncCompletableWriter
@@ -393,9 +393,9 @@
                               ^Future fut# (dispatch task#)]
                           (when (instance? CompletableFuture c#)
                             (let [^Function cancel# (JavaFunction.
-                                                      (fn [~'_]
-                                                        (async-cancel! c#)
-                                                        (future-cancel fut#)))]
+                                                     (fn [~'_]
+                                                       (async-cancel! c#)
+                                                       (future-cancel fut#)))]
                               (.exceptionally ^CompletableFuture c#
                                               ^Function cancel#)))
                           c#)))))
