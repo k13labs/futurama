@@ -1,6 +1,6 @@
 This is a history of changes to k13labs/futurama
 
-# 1.0.5-SNAPSHOT
+# 1.0.5
 * replace uses of instance-satisfies? with clojure.core/satisfies?.
 
 # 1.0.4
