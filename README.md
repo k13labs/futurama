@@ -57,7 +57,7 @@ GNU Make is used to simplify invocation of some commands.
 
 Futurama releases for this project are on [Clojars](https://clojars.org/). Simply add the following to your project:
 
-[![Clojars Project](http://clojars.org/com.github.k13labs/futurama/latest-version.svg)](http://clojars.org/com.github.k13labs/futurama)
+[![Clojars Project](https://clojars.org/com.github.k13labs/futurama/latest-version.svg)](http://clojars.org/com.github.k13labs/futurama)
 
 # _Communication_
 
