@@ -24,8 +24,8 @@
 
 ;;; Use a requiring resolve here to dynamically use the correct implementation and maintain backwards compatibility
 (def state-machine-impl
-  (or (requiring-resolve 'clojure.core.async.impl.go/state-machine)
-      (requiring-resolve 'clojure.core.async.impl.ioc-macros/state-machine)))
+  (or (requiring-resolve 'clojure.core.async.impl.ioc-macros/state-machine)
+      (requiring-resolve 'clojure.core.async.impl.go/state-machine)))
 
 (deftype JavaFunction [f]
   Function
