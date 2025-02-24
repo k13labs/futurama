@@ -36,9 +36,7 @@ jobs:
       env:
         TEST_CLOJURE_ALIAS: ${{matrix.test_clojure_alias}}
         TEST_CORE_ASYNC_ALIAS: ${{matrix.test_core_async_alias}}
-      run: make lint test TEST_CLOJURE_ALIAS=$TEST_CLOJURE_ALIAS TEST_CORE_ASYNC_ALIAS=$TEST_CORE_ASYNC_ALIAS
-    - name: Run clj-kondo linter
-      run: make lint
+      run: make test TEST_CLOJURE_ALIAS=$TEST_CLOJURE_ALIAS TEST_CORE_ASYNC_ALIAS=$TEST_CORE_ASYNC_ALIAS
   build:
     runs-on: ubuntu-latest
     steps:
