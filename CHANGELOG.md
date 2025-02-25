@@ -1,7 +1,7 @@
 This is a history of changes to k13labs/futurama
 
 # 1.1.0
-* replace default async channel factory used in async macro with async promise-channel factory
+* replace default async channel factory used in async macro with async promise-channel factory, for more consistent with future/promise behavior.
 * add support for core.async > 1.7.x with backwards compabitility for core.async 1.6.x and lower
 * add tests matrix for:
   - java: 11, 21
