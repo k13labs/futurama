@@ -23,6 +23,8 @@
     (f))
   (f/with-async-channel-factory
     (f))
+  (f/with-async-promise-channel-factory
+    (f))
   (f/with-async-promise-factory
     (f))
   (f/with-async-deferred-factory

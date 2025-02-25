@@ -5,9 +5,9 @@
   <groupId>com.github.k13labs</groupId>
   <artifactId>futurama</artifactId>
   <name>futurama</name>
-  <version>1.0.5</version>
+  <version>1.1.0</version>
   <scm>
-    <tag>1.0.5</tag>
+    <tag>1.1.0</tag>
     <url>https://github.com/k13labs/futurama</url>
     <connection>scm:git:git://github.com/k13labs/futurama.git</connection>
     <developerConnection>scm:git:ssh://git@github.com/k13labs/futurama.git</developerConnection>
@@ -22,17 +22,17 @@
     <dependency>
       <groupId>org.clojure</groupId>
       <artifactId>clojure</artifactId>
-      <version>1.11.4</version>
-    </dependency>
-    <dependency>
-      <groupId>org.clojure</groupId>
-      <artifactId>core.async</artifactId>
-      <version>1.6.681</version>
+      <version>1.12.0</version>
     </dependency>
     <dependency>
       <groupId>manifold</groupId>
       <artifactId>manifold</artifactId>
       <version>0.4.3</version>
+    </dependency>
+    <dependency>
+      <groupId>org.clojure</groupId>
+      <artifactId>core.async</artifactId>
+      <version>1.7.701</version>
     </dependency>
   </dependencies>
   <build>

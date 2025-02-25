@@ -2,7 +2,7 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as core-impl]
             [clojure.core.async.impl.channels :refer [box]]
-            [clojure.core.async.impl.ioc-macros :as ioc]
+            [clojure.core.async.impl.ioc-macros :as rt]
             [clojure.core.reducers :as r]
             [futurama.impl :as impl]
             [futurama.util :as u]
@@ -21,6 +21,11 @@
            [java.util.concurrent.locks Lock]
            [java.util.function Function BiConsumer]
            [manifold.deferred Deferred]))
+
+;;; Use a requiring resolve here to dynamically use the correct implementation and maintain backwards compatibility
+(def state-machine-impl
+  (or (requiring-resolve 'clojure.core.async.impl.ioc-macros/state-machine)
+      (requiring-resolve 'clojure.core.async.impl.go/state-machine)))
 
 (deftype JavaFunction [f]
   Function
@@ -41,6 +46,11 @@
   ^ManyToManyChannel []
   (async/chan 1))
 
+(defn async-promise-channel-factory
+  "Creates a core async promise channel"
+  ^ManyToManyChannel []
+  (async/promise-chan))
+
 (defn async-future-factory
   "Creates a new CompletableFuture"
   ^CompletableFuture []
@@ -56,7 +66,7 @@
   ^Deferred []
   (d/deferred))
 
-(def ^:dynamic *async-factory* async-channel-factory)
+(def ^:dynamic *async-factory* async-promise-channel-factory)
 
 (defn set-async-factory!
   "alters the root binding of *async-factory* to be equal to `async-factory-fn`"
@@ -79,6 +89,12 @@
   "temporarily binds *async-factory* to the speficied `async-channel-factory` and executes body."
   [& body]
   `(with-async-factory async-channel-factory
+     ~@body))
+
+(defmacro with-async-promise-channel-factory
+  "temporarily binds *async-factory* to the speficied `async-promise-channel-factory` and executes body."
+  [& body]
+  `(with-async-factory async-promise-channel-factory
      ~@body))
 
 (defmacro with-async-promise-factory
@@ -382,14 +398,15 @@
                         (let [captured-bindings# (Var/getThreadBindingFrame)
                               ^Runnable task# (^:once fn* []
                                                           (let [~@(mapcat (fn [[l sym]] [sym `(^:once fn* [] ~(vary-meta l dissoc :tag))]) crossing-env)
-                                                                f# ~(ioc/state-machine `(try
-                                                                                          ~@body
-                                                                                          (catch Throwable ~'e
-                                                                                            (unwrap-exception ~'e))) 1 [crossing-env &env] ioc/async-custom-terminators)
+                                                                f# ~(state-machine-impl
+                                                                     `(try
+                                                                        ~@body
+                                                                        (catch Throwable ~'e
+                                                                          (unwrap-exception ~'e))) 1 [crossing-env &env] rt/async-custom-terminators)
                                                                 state# (-> (f#)
-                                                                           (ioc/aset-all! ioc/USER-START-IDX c#
-                                                                                          ioc/BINDINGS-IDX captured-bindings#))]
-                                                            (ioc/run-state-machine-wrapped state#)))
+                                                                           (rt/aset-all! rt/USER-START-IDX c#
+                                                                                         rt/BINDINGS-IDX captured-bindings#))]
+                                                            (rt/run-state-machine-wrapped state#)))
                               ^Future fut# (dispatch task#)]
                           (when (instance? CompletableFuture c#)
                             (let [^Function cancel# (JavaFunction.

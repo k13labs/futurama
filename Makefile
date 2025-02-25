@@ -1,5 +1,8 @@
 .PHONY: repl test clean deploy install format-check format-fix
 
+TEST_CLOJURE_ALIAS ?= clojure-1.12
+TEST_CORE_ASYNC_ALIAS ?= core.async-1.7
+
 SHELL := /bin/bash
 
 env:
@@ -9,7 +12,8 @@ repl:
 	clojure -M:dev:test:app:repl
 
 test:
-	clojure -M:dev:test:app:runner --focus :unit --reporter kaocha.report/documentation --no-capture-output
+	clojure -M:$(TEST_CLOJURE_ALIAS):$(TEST_CORE_ASYNC_ALIAS):dev:test:app:runner \
+		--focus :unit --reporter kaocha.report/documentation --no-capture-output
 
 clean:
 	rm -rf target build
