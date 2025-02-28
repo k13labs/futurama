@@ -1,23 +1,22 @@
 (ns futurama.core-test
-  (:require [clojure.test :refer [deftest testing is use-fixtures]]
-            [futurama.core :refer [!<!! !<! !<!* <!* with-pool
-                                   async async-> async->> async?
-                                   async-future async-channel async-deferred
-                                   async-for async-map async-reduce
-                                   async-some async-every?
-                                   async-prewalk async-postwalk
-                                   async-cancel! async-cancelled?
-                                   completable-future fixed-threadpool] :as f]
-            [clojure.core.async :refer [go timeout put! take! <! >! <!!] :as a]
-            [criterium.core :refer [report-result
-                                    quick-benchmark
-                                    with-progress-reporting]])
-  (:import [java.util.concurrent CompletableFuture ExecutionException]
-           [clojure.lang ExceptionInfo]))
+  (:require
+   [bond.james :as bond]
+   [clojure.core.async :refer [<! <!! >! go put! take! timeout] :as a]
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [criterium.core :refer [quick-benchmark report-result
+                           with-progress-reporting]]
+   [futurama.core :refer [!<! !<!! !<!* *thread-pool* <!* async async-> async->>
+                          async-cancel! async-cancelled? async-cancellable?
+                          async-every? async-for async-map async-postwalk
+                          async-prewalk async-reduce async-some async?
+                          thread io-thread compute-thread completable-future
+                          fixed-threadpool get-pool with-pool] :as f])
+  (:import [clojure.lang ExceptionInfo]
+           [java.util.concurrent CompletableFuture ExecutionException]))
 
 (defn async-fixture
   [f]
-  (f/set-async-factory! f/async-future-factory)
+  (f/set-async-factory! f/async-promise-channel-factory)
   (f)
   (f/with-async-future-factory
     (f))
@@ -40,7 +39,7 @@
   `(fn ~(symbol (str "async" (name f)))
      [& ~'argv]
      (async
-      (apply ~f ~@args ~'argv))))
+       (apply ~f ~@args ~'argv))))
 
 (defn plus-a-times-b
   [a b]
@@ -78,60 +77,26 @@
                (catch Throwable e
                  (println "interrupted looping by:" (type e))
                  (deliver a true))))]
+      (is (true? (async-cancellable? f)))
       (go
         (<! (timeout 100))
         (async-cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
       (is (true? @a))
       (is (true? (async-cancelled? f)))))
-  (testing "cancellable async-channel block is interrupted test"
+  (testing "cancellable thread is interrupted test"
     (let [a (promise)
           s (atom 0)
-          f (async-channel
-             (try
-               (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
-                 (Thread/sleep 10)
-                 (println "future looping..." (swap! s inc)))
-               (println "ended future looping.")
-               (deliver a true)
-               (catch Throwable e
-                 (println "interrupted looping by:" (type e))
-                 (deliver a true))))]
-      (go
-        (<! (timeout 100))
-        (async-cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
-      (is (true? @a))
-      (is (true? (async-cancelled? f)))))
-  (testing "cancellable async-future block is interrupted test"
-    (let [a (promise)
-          s (atom 0)
-          f (async-future
-             (try
-               (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
-                 (Thread/sleep 10)
-                 (println "future looping..." (swap! s inc)))
-               (println "ended future looping.")
-               (deliver a true)
-               (catch Throwable e
-                 (println "interrupted looping by:" (type e))
-                 (deliver a true))))]
-      (go
-        (<! (timeout 100))
-        (async-cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
-      (is (true? @a))
-      (is (true? (async-cancelled? f)))))
-  (testing "cancellable async-deferred block is interrupted test"
-    (let [a (promise)
-          s (atom 0)
-          f (async-deferred
-             (try
-               (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
-                 (Thread/sleep 10)
-                 (println "future looping..." (swap! s inc)))
-               (println "ended future looping.")
-               (deliver a true)
-               (catch Throwable e
-                 (println "interrupted looping by:" (type e))
-                 (deliver a true))))]
+          f (thread
+              (try
+                (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
+                  (Thread/sleep 10)
+                  (println "thread looping..." (swap! s inc)))
+                (println "ended thread looping.")
+                (deliver a true)
+                (catch Throwable e
+                  (println "interrupted looping by:" (type e))
+                  (deliver a true))))]
+      (is (true? (async-cancellable? f)))
       (go
         (<! (timeout 100))
         (async-cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
@@ -141,15 +106,16 @@
     (let [a (promise)
           s (atom 0)
           f (async
-             (try
-               (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
-                 (!<! (timeout 10))
-                 (println "future looping..." (swap! s inc)))
-               (println "ended future looping.")
-               (deliver a true)
-               (catch Throwable e
-                 (println "interrupted looping by:" (type e))
-                 (deliver a true))))]
+              (try
+                (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
+                  (!<! (timeout 10))
+                  (println "async looping..." (swap! s inc)))
+                (println "ended async looping.")
+                (deliver a true)
+                (catch Throwable e
+                  (println "interrupted looping by:" (type e))
+                  (deliver a true))))]
+      (is (true? (async-cancellable? f)))
       (go
         (<! (timeout 100))
         (async-cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
@@ -159,17 +125,19 @@
     (let [a (promise)
           s (atom 0)
           f (async
-             (completable-future
-              (async
-               (try
-                 (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
-                   (!<! (timeout 10))
-                   (println "future looping..." (swap! s inc)))
-                 (println "ended future looping.")
-                 (deliver a true)
-                 (catch Exception e
-                   (println "interrupted looping by:" (type e))
-                   (deliver a true))))))]
+              (completable-future
+               (thread
+                 (async
+                   (try
+                     (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
+                       (!<! (timeout 10))
+                       (println "nested looping..." (swap! s inc)))
+                     (println "ended nested looping.")
+                     (deliver a true)
+                     (catch Exception e
+                       (println "interrupted looping by:" (type e))
+                       (deliver a true)))))))]
+      (is (true? (async-cancellable? f)))
       (go
         (<! (timeout 100))
         (async-cancel! f)) ;;; cancelling the completable future causes the backing thread to be interrupted
@@ -177,12 +145,82 @@
       (is (true? (async-cancelled? f))))))
 
 (deftest with-pool-macro-test
-  (testing "with-pool evals body"
-    (!<!!
-     (with-pool @test-pool
-       (async
-        (is (= 100
-               (!<! (CompletableFuture/completedFuture 100)))))))))
+  (testing "with-pool evals body with provided pool"
+    (bond/with-spy [get-pool]
+      (!<!!
+       (with-pool @test-pool
+         (async
+           (is (= 100
+                  (!<! (CompletableFuture/completedFuture 100)))))))
+      (is (= [] (->> get-pool bond/calls (map :args))))))
+  (testing "with-pool uses specified workload pool - io"
+    (let [io-pool (get-pool :io)]
+      (bond/with-spy [get-pool]
+        (!<!!
+         (with-pool :io
+           (async
+             (is (= 100
+                    (!<! (CompletableFuture/completedFuture 100))))
+             (is (= io-pool *thread-pool*)))))
+        (is (= [[:io]] (->> get-pool bond/calls (map :args)))))))
+  (testing "with-pool uses specified workload pool - mixed"
+    (let [mixed-pool (get-pool :mixed)]
+      (bond/with-spy [get-pool]
+        (!<!!
+         (with-pool :mixed
+           (async
+             (is (= 100
+                    (!<! (CompletableFuture/completedFuture 100))))
+             (is (= mixed-pool *thread-pool*)))))
+        (is (= [[:mixed]] (->> get-pool bond/calls (map :args)))))))
+  (testing "with-pool uses specified workload pool - compute"
+    (let [compute-pool (get-pool :compute)]
+      (bond/with-spy [get-pool]
+        (!<!!
+         (with-pool :compute
+           (async
+             (is (= 100
+                    (!<! (CompletableFuture/completedFuture 100))))
+             (is (= compute-pool *thread-pool*)))))
+        (is (= [[:compute]] (->> get-pool bond/calls (map :args))))))))
+
+(deftest thread-macro-test
+  (testing "thread uses workload pool - io"
+    (bond/with-spy [get-pool]
+      (!<!!
+       (thread :io
+         ::done))
+      (is (= [[:io]] (->> get-pool bond/calls (map :args))))))
+  (testing "io-thread uses workload pool - io"
+    (bond/with-spy [get-pool]
+      (!<!!
+       (io-thread
+         ::done))
+      (is (= [[:io]] (->> get-pool bond/calls (map :args))))))
+  (testing "thread uses workload pool - mixed"
+    (bond/with-spy [get-pool]
+      (!<!!
+       (thread :mixed
+         ::done))
+      (is (= [[:mixed]] (->> get-pool bond/calls (map :args))))))
+  (testing "thread uses default pool - mixed"
+    (bond/with-spy [get-pool]
+      (!<!!
+       (thread
+         ::done))
+      (is (= [[:mixed]] (->> get-pool bond/calls (map :args))))))
+  (testing "thread uses workload pool - compute"
+    (bond/with-spy [get-pool]
+      (!<!!
+       (thread :compute
+         ::done))
+      (is (= [[:compute]] (->> get-pool bond/calls (map :args))))))
+  (testing "compute-thread uses workload pool - compute"
+    (bond/with-spy [get-pool]
+      (!<!!
+       (compute-thread
+         ::done))
+      (is (= [[:compute]] (->> get-pool bond/calls (map :args)))))))
 
 (deftest thread-first-macro-tests
   (testing "can thread first async->"
@@ -220,9 +258,9 @@
            (!<!! (async-some
                   (fn [n]
                     (async
-                     (when (odd? n)
-                       (!<! (timeout (- 1000 (* n 100))))
-                       n)))
+                      (when (odd? n)
+                        (!<! (timeout (- 1000 (* n 100))))
+                        n)))
                   (range 10)))))))
 
 (deftest async-every-test
@@ -231,18 +269,18 @@
            (!<!! (async-every?
                   (fn [n]
                     (async
-                     (when (number? n)
-                       (!<! (timeout 50))
-                       true)))
+                      (when (number? n)
+                        (!<! (timeout 50))
+                        true)))
                   (range 10))))))
   (testing "async-every? async test returns false when some false"
     (is (= false
            (!<!! (async-every?
                   (fn [n]
                     (async
-                     (when (not= n 5)
-                       (!<! (timeout 50))
-                       true)))
+                      (when (not= n 5)
+                        (!<! (timeout 50))
+                        true)))
                   (range 10)))))))
 
 (deftest async-reduce-test
@@ -252,20 +290,20 @@
                                  (if (empty? nsq)
                                    10
                                    (async
-                                    (apply + nsq))))
+                                     (apply + nsq))))
                                (async (range 10)))))))
   (testing "async reduce async result handling - provide init"
     (is (= 55
            (!<!! (async-reduce (fn [total number]
                                  (async
-                                  (+ total number))) 10 (async (range 10)))))))
+                                   (+ total number))) 10 (async (range 10)))))))
   (testing "async reduce async result handling - reduce a map"
     (is (= {:foo 1
             :bar 2
             :zlu 10}
            (!<!! (async-reduce (fn [m k v]
                                  (async
-                                  (assoc m k (inc v))))
+                                   (assoc m k (inc v))))
                                {} (async {:foo 0
                                           :bar 1
                                           :zlu 9})))))))
@@ -298,7 +336,8 @@
              (apply map + args)
              (!<!! (apply async-map async-handler args))))))
   (testing "can loop map concurrently, performance test"
-    (let [bench (with-progress-reporting
+    (let [_pool-warmup (<!! (async-map #(async (!<! (timeout 50)) (inc %)) (range 20)))
+          bench (with-progress-reporting
                   (quick-benchmark
                    (<!! (async-map #(async (!<! (timeout 50)) (inc %)) (range 10)))
                    {:verbose true}))
@@ -317,8 +356,8 @@
                       :let [c (+ a b)]
                       :when (and (odd? a) (odd? b))]
                      (async
-                      (!<! (timeout 50))
-                      [a b c (+ a b c)])))
+                       (!<! (timeout 50))
+                       [a b c (+ a b c)])))
                    {:verbose true}))
           [mean [lower upper]] (:mean bench)]
       (report-result bench)
@@ -362,7 +401,7 @@
         (is (= [100 200]
                (!<!!
                 (async
-                 [*test-val1* test-val2]))
+                  [*test-val1* test-val2]))
                (!<!!
                 (completable-future
                  [*test-val1* test-val2])))))))
@@ -374,56 +413,58 @@
            (is (= [100 200]
                   (!<!
                    (async
-                    [*test-val1* test-val2]))
+                     [*test-val1* test-val2]))
                   (!<!
                    (completable-future
                     [*test-val1* test-val2])))))))))
   (testing "sequential collection non-blocking take - <!*"
     (<!!
      (async
-      (is (= (range 1 11)
-             (<!*
-              (for [n (range 10)]
-                (async (inc n)))))))))
+       (is (= (range 1 11)
+              (<!*
+               (for [n (range 10)]
+                 (async (inc n)))))))))
   (testing "sequential collection non-blocking take - !<!*"
     (<!!
      (async
-      (is (= (range 1 11)
-             (!<!*
-              (for [n (range 10)]
-                (async (inc n)))))))))
+       (is (= (range 1 11)
+              (!<!*
+               (for [n (range 10)]
+                 (async (inc n)))))))))
   (testing "nested blocking take - !<!!"
     (is (= {:foo "bar"}
            (!<!! (async
-                  (go
-                    (CompletableFuture/completedFuture
-                     (completable-future
-                      (go
-                        (<! (timeout 50))
-                        (let [c (CompletableFuture.)]
-                          (>! c {:foo "bar"})
-                          (delay
-                            (future
-                              (atom
-                               (let [p (promise)]
-                                 (deliver p c)
-                                 p))))))))))))))
-  (testing "nested non-blocking take - !<!"
-    (<!!
-     (async
-      (is (= {:foo "bar"}
-             (!<! (async
                    (go
                      (CompletableFuture/completedFuture
                       (completable-future
-                       (go
-                         (<! (timeout 50))
-                         (delay
-                           (future
-                             (let [p (promise)]
-                               (deliver p
-                                        (CompletableFuture/completedFuture {:foo "bar"}))
-                               p)))))))))))))))
+                       (thread
+                         (go
+                           (<! (timeout 50))
+                           (let [c (CompletableFuture.)]
+                             (>! c {:foo "bar"})
+                             (delay
+                               (future
+                                 (atom
+                                  (let [p (promise)]
+                                    (deliver p c)
+                                    p)))))))))))))))
+  (testing "nested non-blocking take - !<!"
+    (<!!
+     (async
+       (is (= {:foo "bar"}
+              (!<! (async
+                     (go
+                       (CompletableFuture/completedFuture
+                        (completable-future
+                         (thread
+                           (go
+                             (<! (timeout 50))
+                             (delay
+                               (future
+                                 (let [p (promise)]
+                                   (deliver p
+                                            (CompletableFuture/completedFuture {:foo "bar"}))
+                                   p))))))))))))))))
 
 (deftest error-handling
   (testing "throws async exception on blocking deref from completable future - @"
@@ -437,50 +478,31 @@
             ;;; via Deref it is wrapped in an ExecutionException
            (catch ExecutionException ee
              (throw (ex-cause ee)))))))
-  (testing "throws async exception on blocking deref from async! with completable future - @"
+  (testing "throws async exception on blocking take from thread - !<!!"
     (is (thrown-with-msg?
          ExceptionInfo #"foobar"
-         (try
-           @(async-future
-             (throw (ex-info "foobar" {}))
-             ::result)
-            ;;; this is just necessary to test when an exception is thrown
-            ;;; via Deref it is wrapped in an ExecutionException
-           (catch ExecutionException ee
-             (throw (ex-cause ee)))))))
-  (testing "throws async exception on blocking deref from async! with completable future - @"
-    (is (thrown-with-msg?
-         ExceptionInfo #"foobar"
-         (try
-           (!<!! (async-channel
-                  (throw (ex-info "foobar" {}))
-                  ::result))
-            ;;; this is just necessary to test when an exception is thrown
-            ;;; via Deref it is wrapped in an ExecutionException
-           (catch ExecutionException ee
-             (throw (ex-cause ee)))))))
-  (testing "throws async exception on blocking deref from async! with deferred - @"
-    (is (thrown-with-msg?
-         ExceptionInfo #"foobar"
-         (try
-           @(async-deferred
-             (throw (ex-info "foobar" {}))
-             ::result)
-            ;;; this is just necessary to test when an exception is thrown
-            ;;; via Deref it is wrapped in an ExecutionException
-           (catch ExecutionException ee
-             (throw (ex-cause ee)))))))
-  (testing "throws async exception on blocking take - !<!!"
+         (!<!! (thread
+                 (throw (ex-info "foobar" {}))
+                 ::result)))))
+  (testing "throws async exception on non-blocking take from thread - !<!"
+    (<!!
+     (async
+       (is (thrown-with-msg?
+            ExceptionInfo #"foobar"
+            (!<! (thread
+                   (throw (ex-info "foobar" {}))
+                   ::result)))))))
+  (testing "throws async exception on blocking take from async - !<!!"
     (is (thrown-with-msg?
          ExceptionInfo #"foobar"
          (!<!! (async
-                (throw (ex-info "foobar" {}))
-                ::result)))))
-  (testing "throws async rxception on non-blocking take - !<!"
+                 (throw (ex-info "foobar" {}))
+                 ::result)))))
+  (testing "throws async exception on non-blocking take from async - !<!"
     (<!!
      (async
-      (is (thrown-with-msg?
-           ExceptionInfo #"foobar"
-           (!<! (async
-                 (throw (ex-info "foobar" {}))
-                 ::result))))))))
+       (is (thrown-with-msg?
+            ExceptionInfo #"foobar"
+            (!<! (async
+                   (throw (ex-info "foobar" {}))
+                   ::result))))))))

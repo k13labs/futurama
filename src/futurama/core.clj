@@ -1,11 +1,45 @@
 (ns futurama.core
+  "Futurama is a Clojure library for more deeply integrating async abstractions in the Clojure and JVM ecosystem with Clojure.
+
+  async and thread blocks are dispatched over an internal thread pool,
+  which defaults to using the `ForkJoinPool/commonPool`. They work very
+  similarly to core.async go blocks and thread blocks. Notable different
+  ways are that, async and thread blocks will return Throwable values when
+  exceptions are uncaught, and that taking a value from an async result
+  using `!<!` or `!<!!` will reduce nested async values to a single result.
+
+  Set Java system property `clojure.core.async.go-checking` to true
+  to validate async blocks do not invoke core.async blocking operations.
+  Property is read once, at namespace load time. Recommended for use
+  primarily during development. Invalid blocking calls will throw in
+  go block threads - use Thread.setDefaultUncaughtExceptionHandler()
+  to catch and handle.
+
+  Use the Java system property `futurama.executor-factory`
+  to specify a function that will provide ExecutorServices for
+  application-wide use by futurama in lieu of its defaults.
+  To ensure that futurama uses the same thread pool as core.async,
+  you can set the property to the value `clojure.core.async.impl.dispatch/executor-for`.
+  The property value should name a fully qualified var. The function
+  will be passed a keyword indicating the context of use of the
+  executor, and should return either an ExecutorService, or nil to
+  use the default. Results per keyword will be cached and used for
+  the remainder of the application.
+
+  Possible context arguments are:
+
+  :io - used for :io workloads, default workload type for `async` dispatch, and for `io-thread` macro.
+  :mixed - used by `thread` by default if a workload is not specified.
+  :compute - used for :compute workloads, default workload type for `compute-thread` macro.
+
+  The set of contexts may grow in the future so the function should
+  return nil for unexpected contexts."
   (:require [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as core-impl]
             [clojure.core.async.impl.channels :refer [box]]
             [clojure.core.async.impl.ioc-macros :as rt]
             [clojure.core.reducers :as r]
             [futurama.impl :as impl]
-            [futurama.util :as u]
             [futurama.state :as state]
             [manifold.deferred :as d])
   (:import [clojure.lang Var IDeref IPending IFn IAtom IRef]
@@ -19,23 +53,8 @@
             Executors
             Future]
            [java.util.concurrent.locks Lock]
-           [java.util.function Function BiConsumer]
+           [java.util.function BiConsumer]
            [manifold.deferred Deferred]))
-
-;;; Use a requiring resolve here to dynamically use the correct implementation and maintain backwards compatibility
-(def state-machine-impl
-  (or (requiring-resolve 'clojure.core.async.impl.ioc-macros/state-machine)
-      (requiring-resolve 'clojure.core.async.impl.go/state-machine)))
-
-(deftype JavaFunction [f]
-  Function
-  (apply [_ a]
-    (f a)))
-
-(deftype JavaBiConsumer [f]
-  BiConsumer
-  (accept [_ a b]
-    (f a b)))
 
 (def ^:const ASYNC_CANCELLED ::cancelled)
 
@@ -117,17 +136,29 @@
   ([n]
    (Executors/newFixedThreadPool n)))
 
-(defmacro with-pool
-  "Utility macro which binds *thread-pool* to the supplied pool and then evaluates the `body`."
-  [pool & body]
-  `(binding [*thread-pool* ~pool]
-     ~@body))
+(def get-pool
+  "Given a workload tag, returns an ExecutorService instance and memoizes the result.
+  By default, futurama will defer to a user factory (if provided via sys prop)
+  or the `ForkJoinPool/commonPool` instance. When using core.async 1.7 or higher it's possible to
+  set the `futurama.executor-factory` property to `clojure.core.async.impl.dispatch/executor-for`
+  and futurama will use the same pools as core.async."
+  (memoize
+   (fn ^ExecutorService [workload]
+     (let [sysprop-factory (when-let [esf (System/getProperty "futurama.executor-factory")]
+                             (requiring-resolve (symbol esf)))
+           sp-exec (and sysprop-factory (sysprop-factory workload))]
+       (or sp-exec
+           (ForkJoinPool/commonPool))))))
 
-(defn dispatch
-  "dispatch the function by submitting it to the `*thread-pool*`"
-  ^Future [^Runnable f]
-  (let [^ExecutorService pool (or *thread-pool* (ForkJoinPool/commonPool))]
-    (.submit ^ExecutorService pool ^Runnable f)))
+(defmacro with-pool
+  "Utility macro which binds *thread-pool* to the supplied pool and then evaluates the `body`.
+  The `pool` can be an ExecutorService or can also be a keyword/string to be passed to the `futurama.executor-factory`"
+  [pool & body]
+  `(let [pool# ~pool]
+     (binding [*thread-pool* (if (keyword? pool#)
+                               (get-pool pool#)
+                               pool#)]
+       ~@body)))
 
 (defn unwrap-exception
   "unwraps an ExecutionException or CompletionException via ex-cause until the root exception is returned"
@@ -155,10 +186,7 @@
 (defn async-cancel!
   "Cancels the async item."
   [item]
-  (let [proto-cancel (when (async-cancellable? item)
-                       (impl/cancel! item))
-        stack-cancel (state/set-global-state! item ASYNC_CANCELLED)]
-    (or proto-cancel stack-cancel false)))
+  (impl/cancel! item))
 
 (defn async-cancelled?
   "Checks if the current executing async item or one of its parents or provided item has been cancelled.
@@ -171,10 +199,7 @@
        (some async-cancelled? state/*items*)
        false))
   ([item]
-   (or (when (async-cancellable? item)
-         (impl/cancelled? item))
-       (= (state/get-global-state item) ASYNC_CANCELLED)
-       false)))
+   (impl/cancelled? item)))
 
 (defn async-completed?
   "Checks if the provided `AsyncCompletableReader` instance is completed?"
@@ -187,44 +212,94 @@
   ^Boolean [v]
   (satisfies? core-impl/ReadPort v))
 
-(defmacro completable-future
-  "Asynchronously invokes the body inside a completable future, preserves the current thread binding frame,
-  using by default the `ForkJoinPool/commonPool`, the pool used can be specified via `*thread-pool*` binding."
+(defmacro thread!
+  "Asynchronously invokes the body inside a pooled thread and return over a write port,
+  preserves the current thread binding frame, the pool used can be specified via `*thread-pool*`."
+  [pool port & body]
+  `(let [pool# ~pool
+         port# ~port]
+     (state/push-item port#
+       (let [binding-frame# (Var/cloneThreadBindingFrame)]
+         (impl/async-dispatch-task-handler
+          (or pool#
+              *thread-pool*
+              (get-pool :mixed))
+          port#
+          (^:once
+           fn*
+           []
+           (let [thread-frame# (Var/getThreadBindingFrame)]
+             (Var/resetThreadBindingFrame binding-frame#)
+             (try
+               (let [res# (do ~@body)]
+                 (when (some? res#)
+                   (async/>!! port# res#)))
+               (catch Throwable ~'e
+                 (async/>!! port# (unwrap-exception ~'e)))
+               (finally
+                 (async/close! port#)
+                 (Var/resetThreadBindingFrame thread-frame#))))))))))
+
+(defmacro thread
+  "Asynchronously invokes the body in a pooled thread, preserves the current thread binding frame,
+  and returns the value in a port created via `*async-factory*`, the pool used can be specified
+  via `*thread-pool*`, or through a keyword :io, :mixed, :compute for example."
+  [& workload-and-body]
+  (let [[workload & body] (if (and (keyword? (first workload-and-body))
+                                   (seq (rest workload-and-body)))
+                            workload-and-body
+                            (cons nil workload-and-body))
+        thread-pool (if workload
+                      `(get-pool ~workload)
+                      `*thread-pool*)]
+    `(thread!
+       ~thread-pool
+       (*async-factory*)
+       ~@body)))
+
+(defmacro io-thread
+  "Asynchronously invokes the body in a pooled IO thread, preserves the current thread binding frame,
+  and returns the value in a port created via `*async-factory*`, equivalent to `(thread :io ...)`"
+  [& body]
+  `(thread :io ~@body))
+
+(defmacro compute-thread
+  "Asynchronously invokes the body in a pooled IO thread, preserves the current thread binding frame,
+  and returns the value in a port created via `*async-factory*`, equivalent to `(thread :compute ...)`"
+  [& body]
+  `(thread :compute ~@body))
+
+(defmacro ^:deprecated completable-future
+  "Asynchronously invokes the body in a pooled thread, preserves the current thread binding frame,
+  and returns the value in a CompletableFuture, the pool used can be specified via `*thread-pool*`.
+  DEPRECATED: replace with `futurama.core/thread`"
   ^CompletableFuture [& body]
-  `(let [^CompletableFuture res-fut# (CompletableFuture.)] ;;; this is the CompletableFuture being returned
-     (state/push-item res-fut#
-                      (let [binding-frame# (Var/cloneThreadBindingFrame) ;;; capture the thread local binding frame before start
-                            ^Runnable fbody# (fn do-complete#
-                                               []
-                                               (let [thread-frame# (Var/getThreadBindingFrame)] ;;; get the Thread's binding frame
-                                                 (Var/resetThreadBindingFrame binding-frame#) ;;; set the Clojure binding frame captured
-                                                 (try
-                                                   (.complete res-fut# (do ~@body)) ;;; send the result of evaluating the body to the CompletableFuture
-                                                   (catch Throwable ~'e
-                                      ;;; if we catch an exception we send it to the CompletableFuture
-                                                     (.completeExceptionally res-fut# (unwrap-exception ~'e)))
-                                                   (finally
-                                                     (Var/resetThreadBindingFrame thread-frame#))))) ;;; restore the original Thread's binding frame
-                            ^Future fut# (dispatch fbody#)
-                            ^Function cancel# (JavaFunction.
-                                               (fn [~'_]
-                                                 (async-cancel! res-fut#)
-                                                 (future-cancel fut#)))] ;;; submit the work to the pool and get the FutureTask doing the work
-         ;;; if the CompletableFuture returns exceptionally
-         ;;; then cancel the Future which is currently doing the work
-                        (.exceptionally res-fut# cancel#)
-                        res-fut#))))
+  `(thread!
+     *thread-pool*
+     (async-future-factory)
+     ~@body))
+
+(extend-protocol impl/AsyncCancellable
+  Object
+  (cancel! [this]
+    (state/set-global-state! this ASYNC_CANCELLED)
+    true)
+  (cancelled? [this]
+    (= (state/get-global-state this) ASYNC_CANCELLED))
+
+  Future
+  (cancel! [this]
+    (state/set-global-state! this ASYNC_CANCELLED)
+    (future-cancel this))
+  (cancelled? [this]
+    (or (future-cancelled? this)
+        (= (state/get-global-state this) ASYNC_CANCELLED)
+        false)))
 
 (extend-type Future
   core-impl/ReadPort
   (take! [x handler]
     (impl/async-read-port-take! x handler))
-
-  impl/AsyncCancellable
-  (cancel! [fut]
-    (future-cancel fut))
-  (cancelled? [fut]
-    (future-cancelled? fut))
 
   impl/AsyncCompletableReader
   (get! [fut]
@@ -311,12 +386,6 @@
   (put! [x val handler]
     (impl/async-write-port-put! x val handler))
 
-  impl/AsyncCancellable
-  (cancel! [this]
-    (future-cancel this))
-  (cancelled? [this]
-    (future-cancelled? this))
-
   impl/AsyncCompletableReader
   (get! [fut]
     (try
@@ -326,7 +395,7 @@
   (completed? [fut]
     (.isDone ^CompletableFuture fut))
   (on-complete [fut f]
-    (let [^BiConsumer invoke-cb (JavaBiConsumer.
+    (let [^BiConsumer invoke-cb (impl/->JavaBiConsumer
                                  (fn [val ex]
                                    (f (or ex val))))]
       (.whenComplete ^CompletableFuture fut ^BiConsumer invoke-cb)))
@@ -376,7 +445,7 @@
     (d/realized? dfd)))
 
 (defmacro async!
-  "Asynchronously executes the body, returning `port` immediately to the
+  "Asynchronously executes the body, returning `port` immediately to te
   calling thread. Additionally, any visible calls to !<!, <!, >! and alt!/alts!
   channel operations within the body will block (if necessary) by
   'parking' the calling thread rather than tying up an OS thread.
@@ -391,31 +460,33 @@
 
   Returns the provided port which will receive the result of the body when
   completed; the pool used can be specified via `*thread-pool*` binding."
-  [port & body]
+  [pool port & body]
   (let [crossing-env (zipmap (keys &env) (repeatedly gensym))]
-    `(let [c# ~port]
-       (state/push-item c#
-                        (let [captured-bindings# (Var/getThreadBindingFrame)
-                              ^Runnable task# (^:once fn* []
-                                                          (let [~@(mapcat (fn [[l sym]] [sym `(^:once fn* [] ~(vary-meta l dissoc :tag))]) crossing-env)
-                                                                f# ~(state-machine-impl
-                                                                     `(try
-                                                                        ~@body
-                                                                        (catch Throwable ~'e
-                                                                          (unwrap-exception ~'e))) 1 [crossing-env &env] rt/async-custom-terminators)
-                                                                state# (-> (f#)
-                                                                           (rt/aset-all! rt/USER-START-IDX c#
-                                                                                         rt/BINDINGS-IDX captured-bindings#))]
-                                                            (rt/run-state-machine-wrapped state#)))
-                              ^Future fut# (dispatch task#)]
-                          (when (instance? CompletableFuture c#)
-                            (let [^Function cancel# (JavaFunction.
-                                                     (fn [~'_]
-                                                       (async-cancel! c#)
-                                                       (future-cancel fut#)))]
-                              (.exceptionally ^CompletableFuture c#
-                                              ^Function cancel#)))
-                          c#)))))
+    `(let [pool# ~pool
+           port# ~port]
+       (state/push-item port#
+         (let [captured-bindings# (Var/getThreadBindingFrame)]
+           (impl/async-dispatch-task-handler
+            (or pool#
+                *thread-pool*
+                (get-pool :io))
+            port#
+            (^:once
+             fn*
+             []
+             (let [~@(mapcat
+                      (fn [[l sym]]
+                        [sym `(^:once fn* [] ~(vary-meta l dissoc :tag))])
+                      crossing-env)
+                   f# ~(impl/async-state-machine
+                        `(try
+                           ~@body
+                           (catch Throwable ~'e
+                             (unwrap-exception ~'e))) 1 [crossing-env &env] rt/async-custom-terminators)
+                   state# (-> (f#)
+                              (rt/aset-all! rt/USER-START-IDX port#
+                                            rt/BINDINGS-IDX captured-bindings#))]
+               (rt/run-state-machine-wrapped state#)))))))))
 
 (defmacro async
   "Asynchronously executes the body, returning immediately to the
@@ -433,84 +504,9 @@
   completed; the pool used can be specified via `*thread-pool*` binding."
   [& body]
   `(async!
-    (*async-factory*)
-    ~@body))
-
-(defmacro async-channel
-  "Asynchronously executes the body, returning immediately to the
-  calling thread. Additionally, any visible calls to !<!, <!, >! and alt!/alts!
-  channel operations within the body will block (if necessary) by
-  'parking' the calling thread rather than tying up an OS thread.
-  Upon completion of the operation, the body will be resumed.
-
-  async blocks should not (either directly or indirectly) perform operations
-  that may block indefinitely. Doing so risks depleting the fixed pool of
-  go block threads, causing all go block processing to stop. This includes
-  core.async blocking ops (those ending in !!) and other blocking IO.
-
-  Returns a channel which will receive the result of the body when
-  completed; the pool used can be specified via `*thread-pool*` binding."
-  [& body]
-  `(async!
-    (async-channel-factory)
-    ~@body))
-
-(defmacro async-future
-  "Asynchronously executes the body, returning immediately to the
-  calling thread. Additionally, any visible calls to !<!, <!, >! and alt!/alts!
-  channel operations within the body will block (if necessary) by
-  'parking' the calling thread rather than tying up an OS thread.
-  Upon completion of the operation, the body will be resumed.
-
-  async blocks should not (either directly or indirectly) perform operations
-  that may block indefinitely. Doing so risks depleting the fixed pool of
-  go block threads, causing all go block processing to stop. This includes
-  core.async blocking ops (those ending in !!) and other blocking IO.
-
-  Returns a CompletableFuture which will receive the result of the body when
-  completed; the pool used can be specified via `*thread-pool*` binding."
-  [& body]
-  `(async!
-    (async-future-factory)
-    ~@body))
-
-(defmacro async-deferred
-  "Asynchronously executes the body, returning immediately to the
-  calling thread. Additionally, any visible calls to !<!, <!, >! and alt!/alts!
-  channel operations within the body will block (if necessary) by
-  'parking' the calling thread rather than tying up an OS thread.
-  Upon completion of the operation, the body will be resumed.
-
-  async blocks should not (either directly or indirectly) perform operations
-  that may block indefinitely. Doing so risks depleting the fixed pool of
-  go block threads, causing all go block processing to stop. This includes
-  core.async blocking ops (those ending in !!) and other blocking IO.
-
-  Returns a Deferred which will receive the result of the body when
-  completed; the pool used can be specified via `*thread-pool*` binding."
-  [& body]
-  `(async!
-    (async-deferred-factory)
-    ~@body))
-
-(defmacro async-promise
-  "Asynchronously executes the body, returning immediately to the
-  calling thread. Additionally, any visible calls to !<!, <!, >! and alt!/alts!
-  channel operations within the body will block (if necessary) by
-  'parking' the calling thread rather than tying up an OS thread.
-  Upon completion of the operation, the body will be resumed.
-
-  async blocks should not (either directly or indirectly) perform operations
-  that may block indefinitely. Doing so risks depleting the fixed pool of
-  go block threads, causing all go block processing to stop. This includes
-  core.async blocking ops (those ending in !!) and other blocking IO.
-
-  Returns a clojure Promise which will receive the result of the body when
-  completed; the pool used can be specified via `*thread-pool*` binding."
-  [& body]
-  `(async!
-    (async-promise-factory)
-    ~@body))
+     *thread-pool*
+     (*async-factory*)
+     ~@body))
 
 (deftype AsyncReader [val]
   core-impl/ReadPort
@@ -524,7 +520,7 @@
       (when-let [cb (commit-handler)]
         (if (async? val)
           (do
-            (async/take! val (u/async-reader-handler cb))
+            (async/take! val (impl/async-reader-handler cb))
             nil)
           (box val))))))
 
@@ -629,18 +625,18 @@
                            more])]
                     (recur pairs vars))))]
     `(async
-      (let [args# (for [~@bindings]
-                    [~@bvars])
-            output#
-            (loop [results# []
-                   args# (seq args#)]
-              (if (nil? args#)
-                results#
-                (recur (conj results#
-                             (let [[~@bvars] (first args#)]
-                               ~@body))
-                       (next args#))))]
-        (!<!* output#)))))
+       (let [args# (for [~@bindings]
+                     [~@bvars])
+             output#
+             (loop [results# []
+                    args# (seq args#)]
+               (if (nil? args#)
+                 results#
+                 (recur (conj results#
+                              (let [[~@bvars] (first args#)]
+                                ~@body))
+                        (next args#))))]
+         (!<!* output#)))))
 
 (defn async-map
   "Asynchronously returns the result of applying f to
@@ -659,7 +655,7 @@
   "internal reducer function to work with async args"
   [f & args]
   (async
-   (apply f (!<!* args))))
+    (apply f (!<!* args))))
 
 (defn async-reduce
   "Like core/reduce except, when init is not provided, (f) is used, and async results are read with !<!."
@@ -667,16 +663,16 @@
    (async-reduce f (f) coll))
   ([f init coll]
    (async
-    (r/reduce (partial async-do-reduce* f)
-              (!<! init)
-              (!<! coll)))))
+     (r/reduce (partial async-do-reduce* f)
+               (!<! init)
+               (!<! coll)))))
 
 (defn- async-some-call*
   "internal async-some fn handler to handle async args and result"
   [result pred item]
   (async
-   (when-let [value (!<! (pred (!<! item)))]
-     (async/put! result value))))
+    (when-let [value (!<! (pred (!<! item)))]
+      (async/put! result value))))
 
 (defn async-some
   "Concurrently executes (pred x) and returns the first returned
@@ -688,53 +684,55 @@
   and evaluates to logical true, but not necessarily the first one
   in sequential order."
   [pred coll]
-  (let [result (async/chan 1)]
+  (let [result (*async-factory*)]
     (async!
-     result
-     (let [results (doall
-                    (for [item (!<! coll)]
-                      (async-some-call* result pred item)))]
-       (loop [results (seq results)]
-         (cond
-           (core-impl/closed? result)
-           nil
+      *thread-pool*
+      result
+      (let [results (doall
+                     (for [item (!<! coll)]
+                       (async-some-call* result pred item)))]
+        (loop [results (seq results)]
+          (cond
+            (core-impl/closed? result)
+            nil
 
-           (nil? results)
-           (async/close! result)
+            (nil? results)
+            (async/close! result)
 
-           :else
-           (do
-             (!<! (first results))
-             (recur (next results)))))))
+            :else
+            (do
+              (!<! (first results))
+              (recur (next results)))))))
     result))
 
 (defn- async-every-call*
   "internal async-every? fn handler to handle async args and result"
   [result pred item]
   (async
-   (when-not (!<! (pred (!<! item)))
-     (async/put! result false))))
+    (when-not (!<! (pred (!<! item)))
+      (async/put! result false))))
 
 (defn async-every?
   "Returns true if (pred x) is logical true for every x in coll, else false."
   [pred coll]
-  (let [result (async/chan 1)]
+  (let [result (*async-factory*)]
     (async!
-     result
-     (let [results (for [item coll]
-                     (async-every-call* result pred item))]
-       (loop [results (seq results)]
-         (cond
-           (core-impl/closed? result)
-           nil
+      *thread-pool*
+      result
+      (let [results (for [item coll]
+                      (async-every-call* result pred item))]
+        (loop [results (seq results)]
+          (cond
+            (core-impl/closed? result)
+            nil
 
-           (nil? results)
-           (async/put! result true)
+            (nil? results)
+            (async/put! result true)
 
-           :else
-           (do
-             (!<! (first results))
-             (recur (next results)))))))
+            :else
+            (do
+              (!<! (first results))
+              (recur (next results)))))))
     result))
 
 (defmacro async->
@@ -748,14 +746,14 @@
                             (vec call)
                             (vector call)))]
     `(async
-      (loop [v# ~v
-             [call# & more#] [~@call-parsed-seq]]
-        (if-not call#
-          v#
-          (let [arg# (!<! v#)
-                [f# & args#] call#
-                res# (!<! (apply f# arg# args#))]
-            (recur res# more#)))))))
+       (loop [v# ~v
+              [call# & more#] [~@call-parsed-seq]]
+         (if-not call#
+           v#
+           (let [arg# (!<! v#)
+                 [f# & args#] call#
+                 res# (!<! (apply f# arg# args#))]
+             (recur res# more#)))))))
 
 (defmacro async->>
   "Threads the expr through the forms which can return async result.
@@ -768,20 +766,20 @@
                             (vec call)
                             (vector call)))]
     `(async
-      (loop [v# ~v
-             [call# & more#] [~@call-parsed-seq]]
-        (if-not call#
-          v#
-          (let [arg# (!<! v#)
-                [f# & args#] call#
-                r# (!<! (apply f# (concat args# [arg#])))]
-            (recur r# more#)))))))
+       (loop [v# ~v
+              [call# & more#] [~@call-parsed-seq]]
+         (if-not call#
+           v#
+           (let [arg# (!<! v#)
+                 [f# & args#] call#
+                 r# (!<! (apply f# (concat args# [arg#])))]
+             (recur r# more#)))))))
 
 (defn- async-walk-record*
   "internal async walk adapter to walk a record"
   [innerf r x]
   (async
-   (conj (!<! r) (!<! (innerf (!<! x))))))
+    (conj (!<! r) (!<! (innerf (!<! x))))))
 
 (defn async-walk
   "Traverses form, an arbitrary data structure.  inner and outer are
@@ -790,27 +788,27 @@
   Recognizes all Clojure data structures. Consumes seqs as with doall."
   [inner outer form]
   (async
-   (let [form (!<! form)]
-     (cond
-       (list? form)
-       (!<! (outer (apply list (!<! (async-map inner form)))))
+    (let [form (!<! form)]
+      (cond
+        (list? form)
+        (!<! (outer (apply list (!<! (async-map inner form)))))
 
-       (instance? clojure.lang.IMapEntry form)
-       (outer (clojure.lang.MapEntry/create (!<! (inner (!<! (key form))))
-                                            (!<! (inner (!<! (val form))))))
+        (instance? clojure.lang.IMapEntry form)
+        (outer (clojure.lang.MapEntry/create (!<! (inner (!<! (key form))))
+                                             (!<! (inner (!<! (val form))))))
 
-       (seq? form)
-       (outer (!<! (async-map inner form)))
+        (seq? form)
+        (outer (!<! (async-map inner form)))
 
-       (instance? clojure.lang.IRecord form)
-       (outer (!<! (reduce (partial async-walk-record* inner)
-                           form form)))
+        (instance? clojure.lang.IRecord form)
+        (outer (!<! (reduce (partial async-walk-record* inner)
+                            form form)))
 
-       (coll? form)
-       (outer (into (empty form) (!<! (async-map inner form))))
+        (coll? form)
+        (outer (into (empty form) (!<! (async-map inner form))))
 
-       :else
-       (outer form)))))
+        :else
+        (outer form)))))
 
 (defn async-postwalk
   "Performs a depth-first, post-order traversal of form.  Calls f on
