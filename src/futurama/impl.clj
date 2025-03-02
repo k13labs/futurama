@@ -8,7 +8,6 @@
    [java.util.concurrent
     CompletableFuture
     ExecutorService
-    ForkJoinPool
     Future]
    [java.util.concurrent.locks Lock]
    [java.util.function BiConsumer Function]))

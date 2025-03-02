@@ -8,12 +8,17 @@
   exceptions are uncaught, and that taking a value from an async result
   using `!<!` or `!<!!` will reduce nested async values to a single result.
 
-  Set Java system property `clojure.core.async.go-checking` to true
-  to validate async blocks do not invoke core.async blocking operations.
-  Property is read once, at namespace load time. Recommended for use
-  primarily during development. Invalid blocking calls will throw in
-  go block threads - use Thread.setDefaultUncaughtExceptionHandler()
-  to catch and handle.
+  The dynamic variables `*async-factory*` and `*thread-factory*` can be bound
+  to control which async result type is returned when the `async` or `thread`
+  macros are used. If an `*async-factory*` is bound but no `*thread-factory*`,
+  then calls to `thread` will use the `*async-factory*`, or if a factory is not
+  defined then the default `async-promise-factory` will be used instead.
+
+  Possible factories supported are:
+  - `async-channel-factory`: creates a core.async channel result, with a buffer of size 1.
+  - `async-promise-factory`: creates a core.async promise-channel result.
+  - `async-deferred-factory`: creates a manifold deferred result.
+  - `async-future-factory`: creates a CompletableFuture result.
 
   Use the Java system property `futurama.executor-factory`
   to specify a function that will provide ExecutorServices for
@@ -33,7 +38,16 @@
   :compute - used for :compute workloads, default workload type for `compute-thread` macro.
 
   The set of contexts may grow in the future so the function should
-  return nil for unexpected contexts."
+  return nil for unexpected contexts.
+
+  Copied from core.async, because this is super useful:
+
+  Set Java system property `clojure.core.async.go-checking` to true
+  to validate async blocks do not invoke core.async blocking operations.
+  Property is read once, at namespace load time. Recommended for use
+  primarily during development. Invalid blocking calls will throw in
+  go block threads - use Thread.setDefaultUncaughtExceptionHandler()
+  to catch and handle."
   (:require [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as core-impl]
             [clojure.core.async.impl.channels :refer [box]]
@@ -65,7 +79,7 @@
   ^ManyToManyChannel []
   (async/chan 1))
 
-(defn async-promise-channel-factory
+(defn async-promise-factory
   "Creates a core async promise channel"
   ^ManyToManyChannel []
   (async/promise-chan))
@@ -75,61 +89,67 @@
   ^CompletableFuture []
   (CompletableFuture.))
 
-(defn async-promise-factory
-  "Creates a new clojure Promise"
-  []
-  (promise))
-
 (defn async-deferred-factory
   "Creates a new Manifold Deferred"
   ^Deferred []
   (d/deferred))
 
-(def ^:dynamic *async-factory* async-promise-channel-factory)
+(def ^:dynamic *async-factory* nil)
+
+(def ^:dynamic *thread-factory* nil)
 
 (defn set-async-factory!
-  "alters the root binding of *async-factory* to be equal to `async-factory-fn`"
+  "alters the root binding of `*async-factory*` to be equal to `async-factory-fn`"
   [async-factory-fn]
   (alter-var-root #'*async-factory* (constantly async-factory-fn)))
 
+(defn set-thread-factory!
+  "alters the root binding of `*thread-factory*` to be equal to `thread-factory-fn"
+  [thread-factory-fn]
+  (alter-var-root #'*thread-factory* (constantly thread-factory-fn)))
+
 (defmacro with-async-factory
-  "temporarily binds *async-factory* to the speficied async-factory-fn and executes body."
+  "temporarily binds `*async-factory*` to the speficied `async-factory-fn` and executes body."
   [async-factory-fn & body]
   `(binding [*async-factory* ~async-factory-fn]
      ~@body))
 
-(defmacro with-async-future-factory
-  "temporarily binds *async-factory* to the speficied `async-future-factory` and executes body."
-  [& body]
-  `(with-async-factory async-future-factory
+(defmacro with-thread-factory
+  "temporarily binds `*thread-factory*` to the speficied `thread-factory-fn` and executes body."
+  [thread-factory-fn & body]
+  `(binding [*thread-factory* ~thread-factory-fn]
      ~@body))
 
-(defmacro with-async-channel-factory
-  "temporarily binds *async-factory* to the speficied `async-channel-factory` and executes body."
-  [& body]
-  `(with-async-factory async-channel-factory
-     ~@body))
+(defn async-factory
+  "builds a result object to be used inside async! macro, this function uses the `*async-factory*`
+  it's is bound, or the default factory of `async-promise-factory`."
+  []
+  (cond
+    *async-factory*
+    (*async-factory*)
 
-(defmacro with-async-promise-channel-factory
-  "temporarily binds *async-factory* to the speficied `async-promise-channel-factory` and executes body."
-  [& body]
-  `(with-async-factory async-promise-channel-factory
-     ~@body))
+    :else
+    (async-promise-factory)))
 
-(defmacro with-async-promise-factory
-  "temporarily binds *async-factory* to the speficied `async-promise-factory` and executes body."
-  [& body]
-  `(with-async-factory async-promise-factory
-     ~@body))
+(defn thread-factory
+  "builds a result object to be used inside thread! macro, this function uses the first available
+  factory of `*thread-factory*` or `*async-factory*`, or if neither is bound then uses the default
+  factory of `async-future-factory`."
+  []
+  (cond
+    *thread-factory*
+    (*thread-factory*)
 
-(defmacro with-async-deferred-factory
-  "temporarily binds *async-factory* to the speficied `async-deferred-factory` and executes body."
-  [& body]
-  `(with-async-factory async-deferred-factory
-     ~@body))
+    *async-factory*
+    (*async-factory*)
 
-(defn fixed-threadpool
-  "Creates a fixed-threadpool, by default uses the number of available processors."
+    :else
+    (async-future-factory)))
+
+(defn ^:deprecated fixed-threadpool
+  "Creates a fixed-threadpool, by default uses the number of available processors.
+  DEPRECATED: there's many types of different threadpools and ways to build them,
+  recommend use Executors class directly for specific needs."
   ([]
    (let [cpu-count (.. Runtime getRuntime availableProcessors)]
      (fixed-threadpool cpu-count)))
@@ -242,7 +262,7 @@
 
 (defmacro thread
   "Asynchronously invokes the body in a pooled thread, preserves the current thread binding frame,
-  and returns the value in a port created via `*async-factory*`, the pool used can be specified
+  and returns the value in a port created via `thread-factory`, the pool used can be specified
   via `*thread-pool*`, or through a keyword :io, :mixed, :compute for example."
   [& workload-and-body]
   (let [[workload & body] (if (and (keyword? (first workload-and-body))
@@ -254,18 +274,18 @@
                       `*thread-pool*)]
     `(thread!
        ~thread-pool
-       (*async-factory*)
+       (thread-factory)
        ~@body)))
 
 (defmacro io-thread
   "Asynchronously invokes the body in a pooled IO thread, preserves the current thread binding frame,
-  and returns the value in a port created via `*async-factory*`, equivalent to `(thread :io ...)`"
+  and returns the value in a port created via `(thread-factory)`, equivalent to `(thread :io ...)`"
   [& body]
   `(thread :io ~@body))
 
 (defmacro compute-thread
   "Asynchronously invokes the body in a pooled IO thread, preserves the current thread binding frame,
-  and returns the value in a port created via `*async-factory*`, equivalent to `(thread :compute ...)`"
+  and returns the value in a port created via `(thread-factory)`, equivalent to `(thread :compute ...)`"
   [& body]
   `(thread :compute ~@body))
 
@@ -500,12 +520,12 @@
   go block threads, causing all go block processing to stop. This includes
   core.async blocking ops (those ending in !!) and other blocking IO.
 
-  Returns an instance of the default *async-factory* which will receive the result of the body when
+  Returns an instance of the `(async-factory)` which will receive the result of the body when
   completed; the pool used can be specified via `*thread-pool*` binding."
   [& body]
   `(async!
      *thread-pool*
-     (*async-factory*)
+     (async-factory)
      ~@body))
 
 (deftype AsyncReader [val]
@@ -684,7 +704,7 @@
   and evaluates to logical true, but not necessarily the first one
   in sequential order."
   [pred coll]
-  (let [result (*async-factory*)]
+  (let [result (async-factory)]
     (async!
       *thread-pool*
       result
@@ -715,7 +735,7 @@
 (defn async-every?
   "Returns true if (pred x) is logical true for every x in coll, else false."
   [pred coll]
-  (let [result (*async-factory*)]
+  (let [result (async-factory)]
     (async!
       *thread-pool*
       result

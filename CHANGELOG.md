@@ -3,7 +3,10 @@ This is a history of changes to k13labs/futurama
 # 1.2.0
 * remove async-{future/channel/promise/...} variants of the `async` macro, replace uses with `async`.
 * added `thread`, `io-thread`, `compute-thread` macros to route work to the appropriate thread pool, such as :io, :compute, or :mixed.
-* deprecate the `completable-future` macro, uses of completable-future should be replaced with `thread`, `io-thread`, and `compute-thread`.
+* added `*thread-factory*` dynamic binding to allow separately defining a factory-fn for `thread` calls, distinct from `async` calls.
+* deprecate the `completable-future` macro, uses of completable-future should be replaced with `thread`.
+* deprecate the `fixed-threadpool` function, instead prefer to use Executors thread pools according to need.
+* updated library documentation, better document available async/thread factories and provide a smaller more stable footprint.
 
 # 1.1.0
 * replace default async channel factory used in async macro with async promise-channel factory, for more consistent with future/promise behavior.

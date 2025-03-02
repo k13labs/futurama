@@ -16,18 +16,21 @@
 
 (defn async-fixture
   [f]
-  (f/set-async-factory! f/async-promise-channel-factory)
+  (f/set-async-factory! f/async-promise-factory)
+  (f/set-thread-factory! f/async-promise-factory)
   (f)
-  (f/with-async-future-factory
-    (f))
-  (f/with-async-channel-factory
-    (f))
-  (f/with-async-promise-channel-factory
-    (f))
-  (f/with-async-promise-factory
-    (f))
-  (f/with-async-deferred-factory
-    (f)))
+  (f/with-async-factory f/async-future-factory
+    (f/with-thread-factory f/async-future-factory
+      (f)))
+  (f/with-async-factory f/async-channel-factory
+    (f/with-thread-factory f/async-channel-factory
+      (f)))
+  (f/with-async-factory f/async-promise-factory
+    (f/with-thread-factory f/async-promise-factory
+      (f)))
+  (f/with-async-factory f/async-deferred-factory
+    (f/with-thread-factory f/async-deferred-factory
+      (f))))
 
 (use-fixtures :once async-fixture)
 
