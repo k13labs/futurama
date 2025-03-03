@@ -33,9 +33,9 @@
 
   Possible context arguments are:
 
-  :io - used for :io workloads, default workload type for `async` dispatch, and for `io-thread` macro.
-  :mixed - used by `thread` by default if a workload is not specified.
-  :compute - used for :compute workloads, default workload type for `compute-thread` macro.
+  :io - used for :io workloads, default workload for `async` dispatch, use via `(thread :compute ...)` or `(async :compute ...)`.
+  :mixed - used for :mixed workloads, default workload for `thread` dispatch.
+  :compute - used for :compute workloads, use via `(thread :compute ...)` or `(async :compute ...)`.
 
   The set of contexts may grow in the future so the function should
   return nil for unexpected contexts.
@@ -277,18 +277,6 @@
        (thread-factory)
        ~@body)))
 
-(defmacro io-thread
-  "Asynchronously invokes the body in a pooled IO thread, preserves the current thread binding frame,
-  and returns the value in a port created via `(thread-factory)`, equivalent to `(thread :io ...)`"
-  [& body]
-  `(thread :io ~@body))
-
-(defmacro compute-thread
-  "Asynchronously invokes the body in a pooled IO thread, preserves the current thread binding frame,
-  and returns the value in a port created via `(thread-factory)`, equivalent to `(thread :compute ...)`"
-  [& body]
-  `(thread :compute ~@body))
-
 (defmacro ^:deprecated completable-future
   "Asynchronously invokes the body in a pooled thread, preserves the current thread binding frame,
   and returns the value in a CompletableFuture, the pool used can be specified via `*thread-pool*`.
@@ -522,11 +510,18 @@
 
   Returns an instance of the `(async-factory)` which will receive the result of the body when
   completed; the pool used can be specified via `*thread-pool*` binding."
-  [& body]
-  `(async!
-     *thread-pool*
-     (async-factory)
-     ~@body))
+  [& workload-and-body]
+  (let [[workload & body] (if (and (keyword? (first workload-and-body))
+                                   (seq (rest workload-and-body)))
+                            workload-and-body
+                            (cons nil workload-and-body))
+        thread-pool (if workload
+                      `(get-pool ~workload)
+                      `*thread-pool*)]
+    `(async!
+       ~thread-pool
+       (async-factory)
+       ~@body)))
 
 (deftype AsyncReader [val]
   core-impl/ReadPort

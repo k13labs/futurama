@@ -1,18 +1,16 @@
 (ns futurama.core-test
-  (:require
-   [bond.james :as bond]
-   [clojure.core.async :refer [<! <!! >! go put! take! timeout] :as a]
-   [clojure.test :refer [deftest is testing use-fixtures]]
-   [criterium.core :refer [quick-benchmark report-result
-                           with-progress-reporting]]
-   [futurama.core :refer [!<! !<!! !<!* *thread-pool* <!* async async-> async->>
-                          async-cancel! async-cancelled? async-cancellable?
-                          async-every? async-for async-map async-postwalk
-                          async-prewalk async-reduce async-some async?
-                          thread io-thread compute-thread completable-future
-                          fixed-threadpool get-pool with-pool] :as f])
+  (:require [bond.james :as bond]
+            [clojure.core.async :refer [<! <!! >! go put! take! timeout] :as a]
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [criterium.core :refer [quick-benchmark report-result
+                                    with-progress-reporting]]
+            [futurama.core :refer [!<! !<!! !<!* *thread-pool* <!* async async->
+                                   async->> async-cancel! async-cancellable?
+                                   async-cancelled? async-every? async-for async-map
+                                   async-postwalk async-prewalk async-reduce async-some
+                                   async? completable-future get-pool thread with-pool] :as f])
   (:import [clojure.lang ExceptionInfo]
-           [java.util.concurrent CompletableFuture ExecutionException]))
+           [java.util.concurrent CompletableFuture ExecutionException Executors]))
 
 (defn async-fixture
   [f]
@@ -50,7 +48,7 @@
 
 (def test-pool
   (delay
-    (fixed-threadpool)))
+    (Executors/newFixedThreadPool 2)))
 
 (deftest test-completable-future
   (testing "basic completable-future test"
@@ -187,42 +185,50 @@
              (is (= compute-pool *thread-pool*)))))
         (is (= [[:compute]] (->> get-pool bond/calls (map :args))))))))
 
-(deftest thread-macro-test
+(deftest thread-macro-workload-test
   (testing "thread uses workload pool - io"
     (bond/with-spy [get-pool]
-      (!<!!
-       (thread :io
-         ::done))
+      (is (= ::done
+             (!<!!
+              (thread :io
+                ::done))))
       (is (= [[:io]] (->> get-pool bond/calls (map :args))))))
-  (testing "io-thread uses workload pool - io"
-    (bond/with-spy [get-pool]
-      (!<!!
-       (io-thread
-         ::done))
-      (is (= [[:io]] (->> get-pool bond/calls (map :args))))))
-  (testing "thread uses workload pool - mixed"
-    (bond/with-spy [get-pool]
-      (!<!!
-       (thread :mixed
-         ::done))
-      (is (= [[:mixed]] (->> get-pool bond/calls (map :args))))))
   (testing "thread uses default pool - mixed"
     (bond/with-spy [get-pool]
-      (!<!!
-       (thread
-         ::done))
+      (is (= ::done
+             (!<!!
+              (thread
+                ::done))))
       (is (= [[:mixed]] (->> get-pool bond/calls (map :args))))))
   (testing "thread uses workload pool - compute"
     (bond/with-spy [get-pool]
-      (!<!!
-       (thread :compute
-         ::done))
-      (is (= [[:compute]] (->> get-pool bond/calls (map :args))))))
-  (testing "compute-thread uses workload pool - compute"
+      (is (= ::done
+             (!<!!
+              (thread :compute
+                ::done))))
+      (is (= [[:compute]] (->> get-pool bond/calls (map :args)))))))
+
+(deftest async-macro-workload-test
+  (testing "thread uses workload pool - io"
     (bond/with-spy [get-pool]
-      (!<!!
-       (compute-thread
-         ::done))
+      (is (= ::done
+             (!<!!
+              (async :io
+                ::done))))
+      (is (= [[:io]] (->> get-pool bond/calls (map :args))))))
+  (testing "thread uses default pool - io"
+    (bond/with-spy [get-pool]
+      (is (= ::done
+             (!<!!
+              (async
+                ::done))))
+      (is (= [[:io]] (->> get-pool bond/calls (map :args))))))
+  (testing "thread uses workload pool - compute"
+    (bond/with-spy [get-pool]
+      (is (= ::done
+             (!<!!
+              (async :compute
+                ::done))))
       (is (= [[:compute]] (->> get-pool bond/calls (map :args)))))))
 
 (deftest thread-first-macro-tests
