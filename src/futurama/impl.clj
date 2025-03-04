@@ -40,7 +40,6 @@
   (cancelled? [this]))
 
 (defn dispatch
-  "dispatch the function by submitting it to the supplied pool `p` or `*thread-pool*` or the default pool obtained via `(get-pool :mixed)`"
   ^Future [^Runnable task ^ExecutorService pool]
   (.submit ^ExecutorService pool ^Runnable task))
 
