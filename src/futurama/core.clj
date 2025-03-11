@@ -33,7 +33,7 @@
 
   Possible context arguments are:
 
-  :io - used for :io workloads, default workload for `async` dispatch, use via `(thread :compute ...)` or `(async :compute ...)`.
+  :io - used for :io workloads, default workload for `async` dispatch, use via `(thread :io ...)` or `(async :io ...)`.
   :mixed - used for :mixed workloads, default workload for `thread` dispatch.
   :compute - used for :compute workloads, use via `(thread :compute ...)` or `(async :compute ...)`.
 
