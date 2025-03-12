@@ -13,9 +13,8 @@
 (defmacro push-item
   "Pushes the async item into the `*items*` vector"
   [item & body]
-  `(let [item# ~item]
-     (binding [*items* (conj *items* item#)]
-       ~@body)))
+  `(binding [*items* (conj *items* ~item)]
+     ~@body))
 
 (defn ^:no-doc set-global-state!
   "Sets the value of the item's global state"

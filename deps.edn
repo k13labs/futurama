@@ -12,7 +12,7 @@
   :core.async-1.6 {:extra-deps {org.clojure/core.async {:mvn/version "1.6.681"}}}
   :core.async-1.7 {:extra-deps {org.clojure/core.async {:mvn/version "1.7.701"}}}
   :core.async-1.8 {:extra-deps {org.clojure/core.async {:mvn/version "1.8.711-beta1"}}}
-  
+
   :dev {:extra-paths ["dev"]
         :extra-deps {reloaded.repl/reloaded.repl {:mvn/version "0.2.4"}
                      criterium/criterium {:mvn/version "0.4.6"}}}
@@ -26,13 +26,13 @@
   :test {:extra-paths ["test"]
          :extra-deps {lambdaisland/kaocha {:mvn/version "1.80.1274"}
                       org.clojure/test.check {:mvn/version "1.1.1"}
+                      circleci/bond {:mvn/version "0.6.0"}
                       org.slf4j/slf4j-simple {:mvn/version "2.0.11"}
                       pjstadig/humane-test-output {:mvn/version "0.10.0"}}}
 
   :runner {:main-opts ["-e" "(println \"warn-on-reflection =\" (set! *warn-on-reflection* true))"
                        "-m" "kaocha.runner"]
            :exec-fn   kaocha.runner/exec-fn}
-
 
   :repl {:extra-deps {nrepl/nrepl {:mvn/version "1.1.0"}
                       cider/cider-nrepl {:mvn/version "0.44.0"}}
