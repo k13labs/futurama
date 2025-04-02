@@ -5,9 +5,9 @@
   <groupId>com.github.k13labs</groupId>
   <artifactId>futurama</artifactId>
   <name>futurama</name>
-  <version>1.2.0</version>
+  <version>1.3.0</version>
   <scm>
-    <tag>1.2.0</tag>
+    <tag>1.3.0</tag>
     <url>https://github.com/k13labs/futurama</url>
     <connection>scm:git:git://github.com/k13labs/futurama.git</connection>
     <developerConnection>scm:git:ssh://git@github.com/k13labs/futurama.git</developerConnection>

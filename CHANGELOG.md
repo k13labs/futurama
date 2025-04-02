@@ -1,5 +1,8 @@
 This is a history of changes to k13labs/futurama
 
+# 1.3.0
+* remove deprecated `completable-future` and `fixed-threadpool`
+
 # 1.2.0
 * remove async-{future/channel/promise/...} variants of the `async` macro, replace uses with `async`.
 * added `thread`, updated `async`, both macros route work to the appropriate thread pool, such as :io, :compute, or :mixed.

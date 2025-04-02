@@ -1,6 +1,6 @@
 (ns futurama.deferred-test
   (:require [clojure.test :refer [deftest testing is]]
-            [futurama.core :refer [!<!! !<! async completable-future]]
+            [futurama.core :refer [!<!! !<! async thread]]
             [clojure.core.async :refer [go timeout put! take! >! <! <!!] :as a]
             [manifold.deferred :as d])
   (:import [java.util.concurrent CompletableFuture]))
@@ -43,12 +43,12 @@
            (!<!! (async
                    (go
                      (CompletableFuture/completedFuture
-                      (completable-future
-                       (go
-                         (<! (timeout 50))
-                         (let [d (d/deferred)]
-                           (>! d {:foo "bar"})
-                           d))))))))))
+                      (thread
+                        (go
+                          (<! (timeout 50))
+                          (let [d (d/deferred)]
+                            (>! d {:foo "bar"})
+                            d))))))))))
   (testing "nested non-blocking take - !<!"
     (<!!
      (async
@@ -56,9 +56,9 @@
               (!<! (async
                      (go
                        (CompletableFuture/completedFuture
-                        (completable-future
-                         (go
-                           (<! (timeout 50))
-                           (let [d (d/deferred)]
-                             (d/success! d {:foo "bar"})
-                             d)))))))))))))
+                        (thread
+                          (go
+                            (<! (timeout 50))
+                            (let [d (d/deferred)]
+                              (d/success! d {:foo "bar"})
+                              d)))))))))))))
