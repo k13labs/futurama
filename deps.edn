@@ -1,6 +1,6 @@
 {:paths ["src" "resources"]
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
-        org.clojure/core.async {:mvn/version "1.7.701"}
+        org.clojure/core.async {:mvn/version "1.8.730"}
         manifold/manifold {:mvn/version "0.4.3"}}
 
  ;for more examples of aliases see: https://github.com/seancorfield/dot-clojure
@@ -11,7 +11,7 @@
 
   :core.async-1.6 {:extra-deps {org.clojure/core.async {:mvn/version "1.6.681"}}}
   :core.async-1.7 {:extra-deps {org.clojure/core.async {:mvn/version "1.7.701"}}}
-  :core.async-1.8 {:extra-deps {org.clojure/core.async {:mvn/version "1.8.711-beta1"}}}
+  :core.async-1.8 {:extra-deps {org.clojure/core.async {:mvn/version "1.8.730"}}}
 
   :dev {:extra-paths ["dev"]
         :extra-deps {reloaded.repl/reloaded.repl {:mvn/version "0.2.4"}
