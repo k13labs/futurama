@@ -64,7 +64,6 @@
             ExecutionException
             ExecutorService
             ForkJoinPool
-            Executors
             Future]
            [java.util.concurrent.locks Lock]
            [java.util.function BiConsumer]
@@ -145,16 +144,6 @@
 
     :else
     (async-future-factory)))
-
-(defn ^:deprecated fixed-threadpool
-  "Creates a fixed-threadpool, by default uses the number of available processors.
-  DEPRECATED: there's many types of different threadpools and ways to build them,
-  recommend use Executors class directly for specific needs."
-  ([]
-   (let [cpu-count (.. Runtime getRuntime availableProcessors)]
-     (fixed-threadpool cpu-count)))
-  ([n]
-   (Executors/newFixedThreadPool n)))
 
 (def get-pool
   "Given a workload tag, returns an ExecutorService instance and memoizes the result.
@@ -276,16 +265,6 @@
        ~thread-pool
        (thread-factory)
        ~@body)))
-
-(defmacro ^:deprecated completable-future
-  "Asynchronously invokes the body in a pooled thread, preserves the current thread binding frame,
-  and returns the value in a CompletableFuture, the pool used can be specified via `*thread-pool*`.
-  DEPRECATED: replace with `futurama.core/thread`"
-  ^CompletableFuture [& body]
-  `(thread!
-     *thread-pool*
-     (async-future-factory)
-     ~@body))
 
 (extend-protocol impl/AsyncCancellable
   Object

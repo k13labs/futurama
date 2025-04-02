@@ -1,7 +1,7 @@
 (ns futurama.main
   (:require
    [clojure.core.async :refer [<! go timeout]]
-   [futurama.core :refer [!<! !<!! async completable-future]])
+   [futurama.core :refer [!<! !<!! async thread]])
   (:gen-class)
   (:import
    [java.util.concurrent CompletableFuture]))
@@ -18,14 +18,14 @@
    "async result:"
    (!<!!
     (async
-     (<! (timeout 50))
-     (!<!
-      (CompletableFuture/completedFuture
-       (completable-future
-        (delay
+      (<! (timeout 50))
+      (!<!
+       (CompletableFuture/completedFuture
+        (thread
+          (delay)
           (future
             (let [p (promise)]
               (deliver p
                        (CompletableFuture/completedFuture
                         (format-thing-async (vec args))))
-              p))))))))))
+              p)))))))))
