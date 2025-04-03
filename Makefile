@@ -1,7 +1,7 @@
 .PHONY: repl test clean deploy install format-check format-fix
 
 TEST_CLOJURE_ALIAS ?= clojure-1.12
-TEST_CORE_ASYNC_ALIAS ?= core.async-1.7
+TEST_CORE_ASYNC_ALIAS ?= core.async-1.8
 
 REPL_CLOJURE_ALIAS ?= clojure-1.12
 REPL_CORE_ASYNC_ALIAS ?= core.async-1.8

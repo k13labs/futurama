@@ -1,5 +1,8 @@
 This is a history of changes to k13labs/futurama
 
+# 1.3.1
+* update core async version to latest `1.8.735`
+
 # 1.3.0
 * remove deprecated `completable-future` and `fixed-threadpool`
 * update core async version to latest `1.8.730`
