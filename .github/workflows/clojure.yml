@@ -12,9 +12,9 @@ jobs:
   test:
     strategy:
       matrix:
-        java_version: [corretto-11,corretto-21]
+        java_version: [corretto-11, corretto-21, corretto-24, corretto-25]
         test_clojure_alias: [clojure-1.10, clojure-1.11, clojure-1.12]
-        test_core_async_alias: [core.async-1.6, core.async-1.7, core.async-1.8]
+        test_core_async_alias: [core.async-1.6, core.async-1.7, core.async-1.8, core.async-1.9]
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
