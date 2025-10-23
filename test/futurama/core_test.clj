@@ -4,8 +4,8 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [criterium.core :refer [quick-benchmark report-result
                                     with-progress-reporting]]
-            [futurama.core :refer [!<! !<!! !<!* *thread-pool* <!* async async->
-                                   async->> async-cancel! async-cancellable?
+            [futurama.core :refer [!<! !<!! !<!* <!* async async-> async->>
+                                   async-cancel! async-cancellable? async-completed?
                                    async-cancelled? async-every? async-for async-map
                                    async-postwalk async-prewalk async-reduce async-some
                                    async? get-pool thread with-pool] :as f])
@@ -14,21 +14,21 @@
 
 (defn async-fixture
   [f]
+  (f/set-async-factory! f/async-future-factory)
+  (f/set-thread-factory! f/async-future-factory)
+  (f)
+  (f/set-async-factory! f/async-channel-factory)
+  (f/set-thread-factory! f/async-channel-factory)
+  (f)
   (f/set-async-factory! f/async-promise-factory)
   (f/set-thread-factory! f/async-promise-factory)
   (f)
-  (f/with-async-factory f/async-future-factory
-    (f/with-thread-factory f/async-future-factory
-      (f)))
-  (f/with-async-factory f/async-channel-factory
-    (f/with-thread-factory f/async-channel-factory
-      (f)))
-  (f/with-async-factory f/async-promise-factory
-    (f/with-thread-factory f/async-promise-factory
-      (f)))
-  (f/with-async-factory f/async-deferred-factory
-    (f/with-thread-factory f/async-deferred-factory
-      (f))))
+  (f/set-async-factory! f/async-deferred-factory)
+  (f/set-thread-factory! f/async-deferred-factory)
+  (f)
+  (f/set-async-factory! nil)
+  (f/set-thread-factory! nil)
+  (f))
 
 (use-fixtures :once async-fixture)
 
@@ -48,69 +48,112 @@
 
 (def test-pool
   (delay
-    (Executors/newFixedThreadPool 2)))
+    (Executors/newFixedThreadPool 10)))
 
 (deftest cancel-async-test
+  (testing "cancellable future is interrupted test"
+    (with-pool @test-pool
+      (let [interrupted (atom false)
+            a (promise)
+            s (atom 0)
+            f (future
+                (try
+                  (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
+                    (Thread/sleep 90)
+                    (println "thread looping..." (swap! s inc)))
+                  (println "ended thread looping.")
+                  (deliver a true)
+                  (catch InterruptedException e
+                    (println "interrupted looping by:" (type e))
+                    (reset! interrupted true)
+                    (deliver a true))))]
+        (is (true? (async-cancellable? f)))
+        (go
+          (<! (timeout 100))
+          (async-cancel! f)) ;;; cancelling the thread causes the backing thread to be interrupted
+        (is (true? @a))
+        (is (true? (async-cancelled? f)))
+        (is (true? (async-completed? f)))
+        (is (true? @interrupted)))))
   (testing "cancellable thread is interrupted test"
-    (let [a (promise)
-          s (atom 0)
-          f (thread
-              (try
-                (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
-                  (Thread/sleep 10)
-                  (println "thread looping..." (swap! s inc)))
-                (println "ended thread looping.")
-                (deliver a true)
-                (catch Throwable e
-                  (println "interrupted looping by:" (type e))
-                  (deliver a true))))]
-      (is (true? (async-cancellable? f)))
-      (go
-        (<! (timeout 100))
-        (async-cancel! f)) ;;; cancelling the thread causes the backing thread to be interrupted
-      (is (true? @a))
-      (is (true? (async-cancelled? f)))))
+    (with-pool @test-pool
+      (let [interrupted (atom false)
+            a (promise)
+            s (atom 0)
+            f (f/thread
+                (try
+                  (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
+                    (Thread/sleep 90)
+                    (println "thread looping..." (swap! s inc)))
+                  (println "ended thread looping.")
+                  (deliver a true)
+                  (catch InterruptedException e
+                    (println "interrupted looping by:" (type e))
+                    (reset! interrupted true)
+                    (deliver a true))))]
+        (is (true? (async-cancellable? f)))
+        (go
+          (<! (timeout 100))
+          (async-cancel! f)) ;;; cancelling the thread causes the backing thread to be interrupted
+        (is (true? @a))
+        (is (true? (async-cancelled? f)))
+        (is (true? (async-completed? f)))
+        (if (= f/*thread-factory* f/async-channel-factory) ;;; only true when using future based threads)
+          (is (false? @interrupted))
+          (is (true? @interrupted))))))
   (testing "cancellable async block is interrupted test"
-    (let [a (promise)
-          s (atom 0)
-          f (async
-              (try
-                (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
-                  (!<! (timeout 10))
-                  (println "async looping..." (swap! s inc)))
-                (println "ended async looping.")
-                (deliver a true)
-                (catch Throwable e
-                  (println "interrupted looping by:" (type e))
-                  (deliver a true))))]
-      (is (true? (async-cancellable? f)))
-      (go
-        (<! (timeout 100))
-        (async-cancel! f)) ;;; cancelling the thread causes the backing thread to be interrupted
-      (is (true? @a))
-      (is (true? (async-cancelled? f)))))
-  (testing "cancellable nested async cancellable is interrupted test"
-    (let [a (promise)
-          s (atom 0)
-          f (async
-              (CompletableFuture/completedFuture
-               (thread
-                 (async
-                   (try
-                     (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
-                       (!<! (timeout 10))
-                       (println "nested looping..." (swap! s inc)))
-                     (println "ended nested looping.")
-                     (deliver a true)
-                     (catch Exception e
-                       (println "interrupted looping by:" (type e))
-                       (deliver a true)))))))]
-      (is (true? (async-cancellable? f)))
-      (go
-        (<! (timeout 100))
-        (async-cancel! f)) ;;; cancelling the thread causes the backing thread to be interrupted
-      (is (true? @a))
-      (is (true? (async-cancelled? f))))))
+    (with-pool @test-pool
+      (let [interrupted (atom false)
+            a (promise)
+            s (atom 0)
+            f (f/async
+                (try
+                  (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
+                    (Thread/sleep 90)
+                    (println "thread looping..." (swap! s inc)))
+                  (println "ended thread looping.")
+                  (deliver a true)
+                  (catch InterruptedException e
+                    (println "interrupted looping by:" (type e))
+                    (reset! interrupted true)
+                    (deliver a true))))]
+        (is (true? (async-cancellable? f)))
+        (go
+          (<! (timeout 100))
+          (async-cancel! f)) ;;; cancelling the thread causes the backing thread to be interrupted
+        (is (true? @a))
+        (is (true? (async-cancelled? f)))
+        (is (true? (async-completed? f)))
+        (if (= f/*async-factory* f/async-channel-factory) ;;; only true when using future based threads)
+          (is (false? @interrupted))
+          (is (true? @interrupted))))))
+  (testing "cancellable nested async cancellable is cancelled test"
+    (with-pool @test-pool
+      (let [interrupted (atom false)
+            a (promise)
+            s (atom 0)
+            f (async
+                (CompletableFuture/completedFuture
+                 (thread
+                   (async
+                     (try
+                       (while (not (async-cancelled?)) ;;; this loop goes on infinitely until the thread is interrupted
+                         (Thread/sleep 90)
+                         (println "thread looping..." (swap! s inc)))
+                       (println "ended thread looping.")
+                       (deliver a true)
+                       (catch InterruptedException e
+                         (println "interrupted looping by:" (type e))
+                         (reset! interrupted true)
+                         (deliver a true)))))))]
+        (is (true? (async-cancellable? f)))
+        (go
+          (<! (timeout 100))
+          (async-cancel! f)) ;;; cancelling the thread causes the backing thread to be interrupted
+        (is (true? @a))
+        (is (true? (async-cancelled? f)))
+        (is (true? (async-completed? f)))
+        (is (false? @interrupted))))))
 
 (deftest with-pool-macro-test
   (testing "with-pool evals body with provided pool"
@@ -129,7 +172,7 @@
            (async
              (is (= 100
                     (!<! (CompletableFuture/completedFuture 100))))
-             (is (= io-pool *thread-pool*)))))
+             (is (= io-pool f/*thread-pool*)))))
         (is (= [[:io]] (->> get-pool bond/calls (map :args)))))))
   (testing "with-pool uses specified workload pool - mixed"
     (let [mixed-pool (get-pool :mixed)]
@@ -139,7 +182,7 @@
            (async
              (is (= 100
                     (!<! (CompletableFuture/completedFuture 100))))
-             (is (= mixed-pool *thread-pool*)))))
+             (is (= mixed-pool f/*thread-pool*)))))
         (is (= [[:mixed]] (->> get-pool bond/calls (map :args)))))))
   (testing "with-pool uses specified workload pool - compute"
     (let [compute-pool (get-pool :compute)]
@@ -149,7 +192,7 @@
            (async
              (is (= 100
                     (!<! (CompletableFuture/completedFuture 100))))
-             (is (= compute-pool *thread-pool*)))))
+             (is (= compute-pool f/*thread-pool*)))))
         (is (= [[:compute]] (->> get-pool bond/calls (map :args))))))))
 
 (deftest thread-macro-workload-test

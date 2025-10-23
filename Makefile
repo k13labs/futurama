@@ -17,9 +17,15 @@ env:
 repl:
 	clojure -M:$(REPL_CLOJURE_ALIAS):$(REPL_CORE_ASYNC_ALIAS):dev:test:app:repl
 
+repl-next: REPL_CORE_ASYNC_ALIAS := core.async-1.9
+repl-next: repl
+
 test:
 	clojure -M:$(TEST_CLOJURE_ALIAS):$(TEST_CORE_ASYNC_ALIAS):dev:test:app:runner \
 		--focus :unit --reporter kaocha.report/documentation --no-capture-output
+
+test-next: TEST_CORE_ASYNC_ALIAS := core.async-1.9
+test-next: test
 
 clean:
 	rm -rf target build
