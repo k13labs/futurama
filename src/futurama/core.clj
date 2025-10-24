@@ -106,25 +106,25 @@
   (alter-var-root #'*async-factory* (constantly async-factory-fn)))
 
 (defn set-thread-factory!
-  "alters the root binding of `*thread-factory*` to be equal to `thread-factory-fn"
+  "alters the root binding of `*thread-factory*` to be equal to `thread-factory-fn`"
   [thread-factory-fn]
   (alter-var-root #'*thread-factory* (constantly thread-factory-fn)))
 
 (defmacro with-async-factory
-  "temporarily binds `*async-factory*` to the speficied `async-factory-fn` and executes body."
+  "temporarily binds `*async-factory*` to the specified `async-factory-fn` and executes body."
   [async-factory-fn & body]
   `(binding [*async-factory* ~async-factory-fn]
      ~@body))
 
 (defmacro with-thread-factory
-  "temporarily binds `*thread-factory*` to the speficied `thread-factory-fn` and executes body."
+  "temporarily binds `*thread-factory*` to the specified `thread-factory-fn` and executes body."
   [thread-factory-fn & body]
   `(binding [*thread-factory* ~thread-factory-fn]
      ~@body))
 
 (defn async-factory
   "builds a result object to be used inside async! macro, this function uses the `*async-factory*`
-  it's is bound, or the default factory of `async-promise-factory`."
+  if it is bound, or the default factory of `async-promise-factory`."
   []
   (cond
     *async-factory*
@@ -280,7 +280,7 @@
        ~@body)))
 
 (defmacro async!
-  "Asynchronously executes the body, returning `port` immediately to te
+  "Asynchronously executes the body, returning `port` immediately to the
   calling thread. Additionally, any visible calls to !<!, <!, >! and alt!/alts!
   channel operations within the body will block (if necessary) by
   'parking' the calling thread rather than tying up an OS thread.
@@ -370,7 +370,7 @@
 (def ^:no-doc rdr ->async-reader)
 
 (defmacro <!
-  "An improved macro version of <!, which also rethrows exceptions returned over the channel.
+  "An improved macro version of <!, which rethrows exceptions returned over the channel.
   Must be called INSIDE a (go ...) or (async ...) block.
   - Will return nil if closed.
   - Will park if nothing is available.

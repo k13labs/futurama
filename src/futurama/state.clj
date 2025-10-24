@@ -21,11 +21,11 @@
      ~@body))
 
 (defn set-cancel-state!
-  "Sets the value of the item's global state"
+  "Sets the cancellation state for the given async item"
   [key val]
   (.put ^Cache @GLOBAL_CANCEL_STATE key val))
 
 (defn get-cancel-state
-  "Gets the value of the item's global state"
+  "Gets the cancellation state for the given async item"
   [key]
   (.getIfPresent ^Cache @GLOBAL_CANCEL_STATE key))
