@@ -49,6 +49,7 @@
   go block threads - use Thread.setDefaultUncaughtExceptionHandler()
   to catch and handle."
   (:require [clojure.core.async :as async]
+            [clojure.core.async.impl.dispatch :as run-impl]
             [clojure.core.async.impl.protocols :as core-impl]
             [clojure.core.async.impl.channels :refer [box]]
             [clojure.core.async.impl.ioc-macros :as rt]
@@ -58,10 +59,12 @@
             [manifold.deferred :as d])
   (:import [clojure.lang Var IDeref IPending IFn IAtom IRef]
            [clojure.core.async.impl.channels ManyToManyChannel]
+           [clojure.core.async.impl.buffers PromiseBuffer]
            [java.util.concurrent
             CompletableFuture
             CompletionException
             ExecutionException
+            CancellationException
             ExecutorService
             ForkJoinPool
             Future]
@@ -76,12 +79,12 @@
 (defn async-channel-factory
   "Creates a core async channel of size 1"
   ^ManyToManyChannel []
-  (async/chan 1))
+  (async/chan 1 nil identity))
 
 (defn async-promise-factory
   "Creates a core async promise channel"
   ^ManyToManyChannel []
-  (async/promise-chan))
+  (async/promise-chan nil identity))
 
 (defn async-future-factory
   "Creates a new CompletableFuture"
@@ -187,15 +190,24 @@
 
 (def ^:no-doc rte rethrow-exception)
 
+(defn- set-cancel-state!
+  [x]
+  (state/set-cancel-state! x ASYNC_CANCELLED))
+
+(defn- get-cancel-state
+  [x]
+  (= (state/get-cancel-state x) ASYNC_CANCELLED))
+
 (defn async-cancellable?
-  "Determines if v satisfies? `AsyncCancellable`"
+  "Determines if v can be cancelled"
   [v]
   (satisfies? impl/AsyncCancellable v))
 
 (defn async-cancel!
   "Cancels the async item."
   [item]
-  (impl/cancel! item))
+  (when (async-cancellable? item)
+    (impl/cancel! item)))
 
 (defn async-cancelled?
   "Checks if the current executing async item or one of its parents or provided item has been cancelled.
@@ -208,13 +220,20 @@
        (some async-cancelled? state/*items*)
        false))
   ([item]
-   (impl/cancelled? item)))
+   (when (satisfies? impl/AsyncCancellable item)
+     (impl/cancelled? item))))
 
 (defn async-completed?
   "Checks if the provided `AsyncCompletableReader` instance is completed?"
   [x]
-  (when (satisfies? impl/AsyncCompletableReader x)
-    (impl/completed? x)))
+  (cond
+    (satisfies? impl/AsyncCompletableReader x)
+    (impl/completed? x)
+
+    (satisfies? core-impl/Channel x)
+    (core-impl/closed? x)
+
+    :else false))
 
 (defn async?
   "returns true if v instance satisfies? core.async's `ReadPort`"
@@ -225,29 +244,23 @@
   "Asynchronously invokes the body inside a pooled thread and return over a write port,
   preserves the current thread binding frame, the pool used can be specified via `*thread-pool*`."
   [pool port & body]
-  `(let [pool# ~pool
+  `(let [pool# (or ~pool *thread-pool* (get-pool :mixed))
          port# ~port]
      (state/push-item port#
        (let [binding-frame# (Var/cloneThreadBindingFrame)]
-         (impl/async-dispatch-task-handler
-          (or pool#
-              *thread-pool*
-              (get-pool :mixed))
-          port#
-          (^:once
-           fn*
-           []
-           (let [thread-frame# (Var/getThreadBindingFrame)]
-             (Var/resetThreadBindingFrame binding-frame#)
-             (try
-               (let [res# (do ~@body)]
-                 (when (some? res#)
-                   (async/>!! port# res#)))
-               (catch Throwable ~'e
-                 (async/>!! port# (unwrap-exception ~'e)))
-               (finally
-                 (async/close! port#)
-                 (Var/resetThreadBindingFrame thread-frame#))))))))))
+         (impl/async-dispatch-task-handler pool# port#
+           (^:once fn* []
+             (let [thread-frame# (Var/getThreadBindingFrame)]
+               (Var/resetThreadBindingFrame binding-frame#)
+               (try
+                 (let [~'res (do ~@body)]
+                   (when (some? ~'res)
+                     (async/>!! port# ~'res)))
+                 (catch Throwable ~'e
+                   (async/>!! port# (unwrap-exception ~'e)))
+                 (finally
+                   (async/close! port#)
+                   (Var/resetThreadBindingFrame thread-frame#))))))))))
 
 (defmacro thread
   "Asynchronously invokes the body in a pooled thread, preserves the current thread binding frame,
@@ -265,171 +278,6 @@
        ~thread-pool
        (thread-factory)
        ~@body)))
-
-(extend-protocol impl/AsyncCancellable
-  Object
-  (cancel! [this]
-    (state/set-global-state! this ASYNC_CANCELLED)
-    true)
-  (cancelled? [this]
-    (= (state/get-global-state this) ASYNC_CANCELLED))
-
-  Future
-  (cancel! [this]
-    (state/set-global-state! this ASYNC_CANCELLED)
-    (future-cancel this))
-  (cancelled? [this]
-    (or (future-cancelled? this)
-        (= (state/get-global-state this) ASYNC_CANCELLED)
-        false)))
-
-(extend-type Future
-  core-impl/ReadPort
-  (take! [x handler]
-    (impl/async-read-port-take! x handler))
-
-  impl/AsyncCompletableReader
-  (get! [fut]
-    (try
-      (.get ^Future fut)
-      (catch Throwable e
-        e)))
-  (completed? [fut]
-    (.isDone ^Future fut))
-  (on-complete [fut f]
-    (async/thread
-      (let [r (impl/get! fut)]
-        (f r))))
-
-  core-impl/Channel
-  (close! [x]
-    (when-not (async-completed? x)
-      (async-cancel! x)))
-  (closed? [x]
-    (async-completed? x)))
-
-(extend-protocol impl/AsyncCompletableWriter
-  IFn
-  (complete! [f v]
-    (boolean (f v)))
-
-  IAtom
-  (complete! [a v]
-    (reset! a v)
-    true)
-
-  IRef
-  (complete! [a v]
-    (dosync
-     (ref-set a v))
-    true))
-
-(extend-protocol core-impl/WritePort
-  IFn
-  (put! [x val handler]
-    (impl/async-write-port-put! x val handler))
-
-  IAtom
-  (put! [x val handler]
-    (impl/async-write-port-put! x val handler))
-
-  IRef
-  (put! [x val handler]
-    (impl/async-write-port-put! x val handler)))
-
-(extend-type IDeref
-  core-impl/ReadPort
-  (take! [x handler]
-    (impl/async-read-port-take! x handler))
-
-  impl/AsyncCompletableReader
-  (get! [ref]
-    (try
-      (deref ref)
-      (catch Throwable e
-        e)))
-  (completed? [ref]
-    (if (instance? IPending ref)
-      (realized? ref)
-      true))
-  (on-complete [ref f]
-    (async/thread
-      (let [r (impl/get! ref)]
-        (f r))))
-
-  core-impl/Channel
-  (close! [ref]
-    (when (instance? IFn ref)
-      (ref nil)))
-  (closed? [ref]
-    (impl/completed? ref)))
-
-(extend-type CompletableFuture
-  core-impl/ReadPort
-  (take! [x handler]
-    (impl/async-read-port-take! x handler))
-
-  core-impl/WritePort
-  (put! [x val handler]
-    (impl/async-write-port-put! x val handler))
-
-  impl/AsyncCompletableReader
-  (get! [fut]
-    (try
-      (.get ^CompletableFuture fut)
-      (catch Throwable e
-        e)))
-  (completed? [fut]
-    (.isDone ^CompletableFuture fut))
-  (on-complete [fut f]
-    (let [^BiConsumer invoke-cb (impl/->JavaBiConsumer
-                                 (fn [val ex]
-                                   (f (or ex val))))]
-      (.whenComplete ^CompletableFuture fut ^BiConsumer invoke-cb)))
-
-  impl/AsyncCompletableWriter
-  (complete! [fut v]
-    (if (instance? Throwable v)
-      (.completeExceptionally ^CompletableFuture fut ^Throwable v)
-      (.complete ^CompletableFuture fut v)))
-
-  core-impl/Channel
-  (close! [fut]
-    (.complete ^CompletableFuture fut nil))
-  (closed? [fut]
-    (.isDone ^CompletableFuture fut)))
-
-(extend-type Deferred
-  core-impl/ReadPort
-  (take! [x handler]
-    (impl/async-read-port-take! x handler))
-
-  core-impl/WritePort
-  (put! [x val handler]
-    (impl/async-write-port-put! x val handler))
-
-  impl/AsyncCompletableReader
-  (get! [dfd]
-    (try
-      (deref dfd)
-      (catch Throwable e
-        e)))
-  (completed? [dfd]
-    (d/realized? dfd))
-  (on-complete [dfd f]
-    (d/on-realized dfd f f))
-
-  impl/AsyncCompletableWriter
-  (complete! [dfd v]
-    (if (instance? Throwable v)
-      (d/error! dfd v)
-      (d/success! dfd v)))
-
-  core-impl/Channel
-  (close! [dfd]
-    (d/success! dfd nil))
-  (closed? [dfd]
-    (d/realized? dfd)))
 
 (defmacro async!
   "Asynchronously executes the body, returning `port` immediately to te
@@ -449,31 +297,27 @@
   completed; the pool used can be specified via `*thread-pool*` binding."
   [pool port & body]
   (let [crossing-env (zipmap (keys &env) (repeatedly gensym))]
-    `(let [pool# ~pool
+    `(let [pool# (or ~pool *thread-pool* (get-pool :io))
            port# ~port]
        (state/push-item port#
          (let [captured-bindings# (Var/getThreadBindingFrame)]
-           (impl/async-dispatch-task-handler
-            (or pool#
-                *thread-pool*
-                (get-pool :io))
-            port#
-            (^:once
-             fn*
-             []
-             (let [~@(mapcat
-                      (fn [[l sym]]
-                        [sym `(^:once fn* [] ~(vary-meta l dissoc :tag))])
-                      crossing-env)
-                   f# ~(impl/async-state-machine
-                        `(try
-                           ~@body
-                           (catch Throwable ~'e
-                             (unwrap-exception ~'e))) 1 [crossing-env &env] rt/async-custom-terminators)
-                   state# (-> (f#)
-                              (rt/aset-all! rt/USER-START-IDX port#
-                                            rt/BINDINGS-IDX captured-bindings#))]
-               (rt/run-state-machine-wrapped state#)))))))))
+           (impl/async-dispatch-task-handler pool# port#
+             (^:once fn* []
+               (run-impl/with-dispatch-thread-marking
+                 (let [~@(mapcat
+                          (fn [[l sym]]
+                            [sym `(^:once fn* []
+                                    ~(vary-meta l dissoc :tag))])
+                          crossing-env)
+                       f# ~(impl/async-state-machine
+                            `(try
+                               ~@body
+                               (catch Throwable ~'e
+                                 (unwrap-exception ~'e))) 1 [crossing-env &env] rt/async-custom-terminators)
+                       state# (-> (f#)
+                                  (rt/aset-all! rt/USER-START-IDX port#
+                                                rt/BINDINGS-IDX captured-bindings#))]
+                   (rt/run-state-machine-wrapped state#))))))))))
 
 (defmacro async
   "Asynchronously executes the body, returning immediately to the
@@ -815,3 +659,234 @@
   "Like postwalk, but does pre-order traversal."
   [f form]
   (async-walk (partial async-prewalk f) identity (f form)))
+
+;;; Begin protocol implementations
+
+(extend-type Future
+  core-impl/ReadPort
+  (take! [x handler]
+    (impl/async-read-port-take! x handler))
+
+  impl/AsyncCompletableReader
+  (get! [fut]
+    (try
+      (.get ^Future fut)
+      (catch Throwable e
+        e)))
+  (completed? [fut]
+    (.isDone ^Future fut))
+  (on-complete [fut f]
+    (async/thread
+      (let [r (impl/get! fut)]
+        (f r)))
+    fut)
+
+  impl/AsyncCancellable
+  (cancel! [fut]
+    (set-cancel-state! fut)
+    (future-cancel fut))
+  (on-cancel-interrupt [fut _]
+    fut)
+  (cancelled? [fut]
+    (or (future-cancelled? fut)
+        (get-cancel-state fut)))
+
+  core-impl/Channel
+  (close! [fut]
+    (when-not (impl/completed? fut)
+      (impl/cancel! fut))
+    nil)
+  (closed? [fut]
+    (impl/completed? fut)))
+
+(extend-protocol impl/AsyncCompletableWriter
+  IFn
+  (complete! [f v]
+    (boolean (f v)))
+
+  IAtom
+  (complete! [a v]
+    (reset! a v)
+    true)
+
+  IRef
+  (complete! [a v]
+    (dosync
+     (ref-set a v))
+    true))
+
+(extend-protocol core-impl/WritePort
+  IFn
+  (put! [x val handler]
+    (impl/async-write-port-put! x val handler))
+
+  IAtom
+  (put! [x val handler]
+    (impl/async-write-port-put! x val handler))
+
+  IRef
+  (put! [x val handler]
+    (impl/async-write-port-put! x val handler)))
+
+(extend-type IDeref
+  core-impl/ReadPort
+  (take! [x handler]
+    (impl/async-read-port-take! x handler))
+
+  impl/AsyncCompletableReader
+  (get! [ref]
+    (try
+      (deref ref)
+      (catch Throwable e
+        e)))
+  (completed? [ref]
+    (if (instance? IPending ref)
+      (realized? ref)
+      true))
+  (on-complete [ref f]
+    (async/thread
+      (let [r (impl/get! ref)]
+        (f r)))
+    ref)
+
+  impl/AsyncCancellable
+  (cancel! [ref]
+    (set-cancel-state! ref)
+    (if (and (instance? IFn ref)
+             (not (impl/completed? ref)))
+      (do
+        (ref (CancellationException. "Task cancelled"))
+        true)
+      false))
+  (on-cancel-interrupt [ref _]
+    ref)
+  (cancelled? [ref]
+    (get-cancel-state ref))
+
+  core-impl/Channel
+  (close! [ref]
+    (when (and (instance? IFn ref)
+               (not (impl/completed? ref)))
+      (ref nil))
+    nil)
+  (closed? [ref]
+    (impl/completed? ref)))
+
+(extend-type CompletableFuture
+  core-impl/ReadPort
+  (take! [x handler]
+    (impl/async-read-port-take! x handler))
+
+  core-impl/WritePort
+  (put! [x val handler]
+    (impl/async-write-port-put! x val handler))
+
+  impl/AsyncCompletableReader
+  (get! [fut]
+    (try
+      (.get ^CompletableFuture fut)
+      (catch Throwable e
+        e)))
+  (completed? [fut]
+    (.isDone ^CompletableFuture fut))
+  (on-complete [fut f]
+    (let [^BiConsumer invoke-cb (impl/->JavaBiConsumer
+                                 (fn [val ex]
+                                   (f (or ex val))))]
+      (.whenComplete ^CompletableFuture fut ^BiConsumer invoke-cb))
+    fut)
+
+  impl/AsyncCompletableWriter
+  (complete! [fut v]
+    (if (instance? Throwable v)
+      (.completeExceptionally ^CompletableFuture fut ^Throwable v)
+      (.complete ^CompletableFuture fut v)))
+
+  impl/AsyncCancellable
+  (on-cancel-interrupt [fut fut']
+    (let [^BiConsumer invoke-cb (impl/->JavaBiConsumer
+                                 (fn [_ _]
+                                   (future-cancel fut')))] ;;; cancel any linked future
+      (.whenComplete ^CompletableFuture fut ^BiConsumer invoke-cb)
+      fut))
+  (cancel! [fut]
+    (set-cancel-state! fut)
+    (future-cancel fut))
+  (cancelled? [fut]
+    (or (future-cancelled? fut)
+        (get-cancel-state fut)))
+
+  core-impl/Channel
+  (close! [fut]
+    (when-not (impl/completed? fut)
+      (.complete ^CompletableFuture fut nil))
+    nil)
+  (closed? [fut]
+    (.isDone ^CompletableFuture fut)))
+
+(extend-type Deferred
+  core-impl/ReadPort
+  (take! [x handler]
+    (impl/async-read-port-take! x handler))
+
+  core-impl/WritePort
+  (put! [x val handler]
+    (impl/async-write-port-put! x val handler))
+
+  impl/AsyncCompletableReader
+  (get! [dfd]
+    (try
+      (deref dfd)
+      (catch Throwable e
+        e)))
+  (completed? [dfd]
+    (d/realized? dfd))
+  (on-complete [dfd f]
+    (d/on-realized dfd f f)
+    dfd)
+
+  impl/AsyncCompletableWriter
+  (complete! [dfd v]
+    (if (instance? Throwable v)
+      (d/error! dfd v)
+      (d/success! dfd v)))
+
+  impl/AsyncCancellable
+  (cancel! [dfd]
+    (set-cancel-state! dfd)
+    (if-not (d/realized? dfd)
+      (d/error! dfd (CancellationException. "Task cancelled"))
+      false))
+  (on-cancel-interrupt [dfd fut]
+    (let [interrupt-handler (fn [_]
+                              (future-cancel fut))]
+      (d/on-realized dfd interrupt-handler interrupt-handler)
+      dfd))
+  (cancelled? [dfd]
+    (get-cancel-state dfd))
+
+  core-impl/Channel
+  (close! [dfd]
+    (d/success! dfd nil)
+    nil)
+  (closed? [dfd]
+    (d/realized? dfd)))
+
+(extend-type ManyToManyChannel
+  impl/AsyncCancellable
+  (cancel! [c]
+    (set-cancel-state! c)
+    (if-not (core-impl/closed? c)
+      (do
+        (async/put! c (CancellationException. "Task cancelled"))
+        (async/close! c)
+        true)
+      false))
+  (on-cancel-interrupt [c fut]
+    (when (->> (.buf ^ManyToManyChannel c)
+               (instance? PromiseBuffer))
+      (async/take! c (fn [_]
+                       (future-cancel fut))))
+    c)
+  (cancelled? [c]
+    (get-cancel-state c)))

@@ -1,0 +1,8 @@
+{:legacy/merge-indents? true
+ :indents {cond [[:inner 0]]
+           fn* [[:inner 0]]
+           futurama.core/async [[:inner 0]]
+           futurama.core/thread [[:inner 0]]
+           futurama.core/async! [[:inner 0]]
+           futurama.core/thread! [[:inner 0]]
+           futurama.impl/async-dispatch-task-handler [[:inner 0]]}}

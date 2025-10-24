@@ -1,5 +1,12 @@
 This is a history of changes to k13labs/futurama
 
+# 1.4.0
+* **Enhanced Cancellation**: Improved cancellation support now works across all async types including core.async channels
+* **State Management**: Replaced WeakHashMap with Caffeine cache for lock-free, thread-safe cancellation state tracking
+* **Dependencies**: Added Caffeine 3.2.2, updated Clojure to 1.12.3, core.async to 1.8.741 (with 1.9.829-alpha2 support)
+* **CI Updates**: Test matrix now covers Clojure 1.12 with core.async 1.8/1.9 on Java 11 & 24 (library remains backwards compatible)
+* **Improvements**: Channel factories use identity exception handler for robust error handling, consistent protocol return values
+
 # 1.3.1
 * update core async version to latest `1.8.735`
 

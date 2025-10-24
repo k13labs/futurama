@@ -1,12 +1,16 @@
 (ns ^:no-doc futurama.state
-  (:import [java.util Map WeakHashMap]
-           [java.util.concurrent.locks Lock ReadWriteLock ReentrantReadWriteLock]))
+  (:import [com.github.benmanes.caffeine.cache Caffeine Cache]))
 
-(defonce ^:private ^ReadWriteLock GLOBAL_STATE_LOCK
-  (ReentrantReadWriteLock.))
-
-(defonce ^:private GLOBAL_STATE
-  (WeakHashMap.))
+(defonce ^:private GLOBAL_CANCEL_STATE
+  (delay
+    (.. (Caffeine/newBuilder)
+        ;;; Use weak keys to allow removal of keys and values when no longer referenced elsewhere
+        (weakKeys)
+        ;;; Cancellation interruption is best effort, arbitrary size based on CPU count, should be enough for most use cases
+        (maximumSize (-> (Runtime/getRuntime)
+                         (.availableProcessors)
+                         (* 1000)))
+        (build))))
 
 (def ^:dynamic *items* [])
 
@@ -16,22 +20,12 @@
   `(binding [*items* (conj *items* ~item)]
      ~@body))
 
-(defn ^:no-doc set-global-state!
+(defn set-cancel-state!
   "Sets the value of the item's global state"
   [key val]
-  (let [^Lock lock (.writeLock GLOBAL_STATE_LOCK)]
-    (.lock lock)
-    (try
-      (.put ^Map GLOBAL_STATE key val)
-      (finally
-        (.unlock lock)))))
+  (.put ^Cache @GLOBAL_CANCEL_STATE key val))
 
-(defn ^:no-doc get-global-state
+(defn get-cancel-state
   "Gets the value of the item's global state"
   [key]
-  (let [^Lock lock (.readLock GLOBAL_STATE_LOCK)]
-    (.lock lock)
-    (try
-      (.get ^Map GLOBAL_STATE key)
-      (finally
-        (.unlock lock)))))
+  (.getIfPresent ^Cache @GLOBAL_CANCEL_STATE key))
