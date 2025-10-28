@@ -1,5 +1,8 @@
 This is a history of changes to k13labs/futurama
 
+# 1.4.1
+* **Bug Fix**: Ensure future is only cancelled if async item was cancelled.
+
 # 1.4.0
 * **Enhanced Cancellation**: Improved cancellation support now works across all async types including core.async channels
 * **State Management**: Replaced WeakHashMap with Caffeine cache for lock-free, thread-safe cancellation state tracking
