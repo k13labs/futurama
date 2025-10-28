@@ -806,7 +806,8 @@
   (on-cancel-interrupt [fut fut']
     (let [^BiConsumer invoke-cb (impl/->JavaBiConsumer
                                  (fn [_ _]
-                                   (future-cancel fut')))] ;;; cancel any linked future
+                                   (when (impl/cancelled? fut)
+                                     (future-cancel fut'))))] ;;; cancel any linked future
       (.whenComplete ^CompletableFuture fut ^BiConsumer invoke-cb)
       fut))
   (cancel! [fut]
@@ -859,7 +860,8 @@
       false))
   (on-cancel-interrupt [dfd fut]
     (let [interrupt-handler (fn [_]
-                              (future-cancel fut))]
+                              (when (impl/cancelled? dfd)
+                                (future-cancel fut)))]
       (d/on-realized dfd interrupt-handler interrupt-handler)
       dfd))
   (cancelled? [dfd]
@@ -886,7 +888,8 @@
     (when (->> (.buf ^ManyToManyChannel c)
                (instance? PromiseBuffer))
       (async/take! c (fn [_]
-                       (future-cancel fut))))
+                       (when (impl/cancelled? c)
+                         (future-cancel fut)))))
     c)
   (cancelled? [c]
     (get-cancel-state c)))
