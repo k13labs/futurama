@@ -1,4 +1,4 @@
-This is a history of changes to k13labs/futurama
+This is a history of changes to gateless/futurama
 
 # 1.4.1
 * **Bug Fix**: Ensure future is only cancelled if async item was cancelled.

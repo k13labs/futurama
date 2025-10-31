@@ -12,7 +12,7 @@ Releasing the project requires these steps:
 6. Update the `pom.xml` in `main` to a new minor version, commit the changes.
 
 [clojars]: https://clojars.org
-[release-site]: https://clojars.org/com.github.k13labs/futurama
-[project-url]: https://github.com/k13labs/futurama/
+[release-site]: https://clojars.org/com.github.gateless/futurama
+[project-url]: https://github.com/gateless/futurama/
 [semantic-versioning]: http://semver.org/
 [github-release-url]: https://help.github.com/articles/creating-releases/

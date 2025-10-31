@@ -1,4 +1,4 @@
-[![Build Status](https://github.com/k13labs/futurama/actions/workflows/clojure.yml/badge.svg)](https://github.com/k13labs/futurama/actions/workflows/clojure.yml)
+[![Build Status](https://github.com/gateless/futurama/actions/workflows/clojure.yml/badge.svg)](https://github.com/gateless/futurama/actions/workflows/clojure.yml)
 
 # Futurama
 
@@ -291,16 +291,16 @@ See the [tests](test/futurama/core_test.clj) for more examples.
 
 Add Futurama to your project dependencies:
 
-[![Clojars Project](https://clojars.org/com.github.k13labs/futurama/latest-version.svg)](http://clojars.org/com.github.k13labs/futurama)
+[![Clojars Project](https://clojars.org/com.github.gateless/futurama/latest-version.svg)](http://clojars.org/com.github.gateless/futurama)
 
 **deps.edn**
 ```clojure
-{:deps {com.github.k13labs/futurama {:mvn/version "1.4.0"}}}
+{:deps {com.github.gateless/futurama {:mvn/version "1.4.0"}}}
 ```
 
 **Leiningen project.clj**
 ```clojure
-[com.github.k13labs/futurama "1.4.0"]
+[com.github.gateless/futurama "1.4.0"]
 ```
 
 ## Requirements
@@ -438,8 +438,8 @@ make build
 
 ## Communication
 
-- **Issues**: Report bugs or request features via [GitHub Issues](https://github.com/k13labs/futurama/issues)
-- **Discussions**: Ask questions or share ideas in [GitHub Discussions](https://github.com/k13labs/futurama/discussions)
+- **Issues**: Report bugs or request features via [GitHub Issues](https://github.com/gateless/futurama/issues)
+- **Discussions**: Ask questions or share ideas in [GitHub Discussions](https://github.com/gateless/futurama/discussions)
 
 # Contributing
 
@@ -457,7 +457,7 @@ and [YourKit YouMonitor](https://www.yourkit.com/youmonitor/).
 
 # LICENSE
 
-Copyright 2024 Jose Gomez
+Copyright 2024 Gateless
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
 
