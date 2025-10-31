@@ -380,7 +380,19 @@
                    {:verbose true}))
           [mean [lower upper]] (:mean bench)]
       (report-result bench)
-      (is (<= 0.04 lower mean upper 0.07)))))
+      (is (<= 0.04 lower mean upper 0.07))))
+  (testing "can loop for concurrently, load test"
+    (let [async-result (future
+                         (!<!!
+                          (async-for
+                           [a (range 1000)
+                            b (range 1000)
+                            :let [c (+ a b)]
+                            :when (and (odd? a) (odd? b))]
+                           (async
+                             (!<! (timeout (rand-int 50))) ;;; simulate workload
+                             (- (+ a b) c)))))]
+      (is (every? zero? @async-result))))) ;;; this should complete without a stack overflow
 
 (deftest async-ops
   (testing "async? for CompletableFuture"

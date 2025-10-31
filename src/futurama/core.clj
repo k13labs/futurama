@@ -382,11 +382,10 @@
 (defmacro <!*
   "Like <! but works with collections of async values"
   [coll]
-  `(loop [~'icoll (not-empty ~coll)
-          ~'ocoll []]
-     (if (nil? ~'icoll)
-       ~'ocoll
-       (recur (next ~'icoll) (conj ~'ocoll (<! (first ~'icoll)))))))
+  `(let [~'ocoll (transient [])]
+     (doseq [~'item (not-empty ~coll)]
+       (conj! ~'ocoll (<! ~'item)))
+     (persistent! ~'ocoll)))
 
 (defmacro <!!
   "An improved macro version of <!!, which also rethrows exceptions returned over the channel.
@@ -412,11 +411,10 @@
 (defmacro !<!*
   "Like !<! but works with collections of async values"
   [coll]
-  `(loop [~'icoll (not-empty ~coll)
-          ~'ocoll []]
-     (if (nil? ~'icoll)
-       ~'ocoll
-       (recur (next ~'icoll) (conj ~'ocoll (!<! (first ~'icoll)))))))
+  `(let [~'ocoll (transient [])]
+     (doseq [~'item (not-empty ~coll)]
+       (conj! ~'ocoll (!<! ~'item)))
+     (persistent! ~'ocoll)))
 
 (defmacro !<!!
   "An improved macro version of <!!, which also rethrows exceptions returned over the channel.
@@ -436,45 +434,11 @@
   the for can contain `<!` and `!<!` calls. This is implicitly wrapped in
   an `async` block."
   [bindings & body]
-  (let [pairs (partition 2 bindings)
-        bvars (loop [[pair & more] pairs
-                     vars []]
-                (if (nil? pair)
-                  (vec (set vars))
-                  (let [[pk pv] pair
-                        [vars pairs]
-                        (if (= pk :let)
-                          [vars
-                           (concat more (partition 2 pv))]
-                          [(reduce
-                            (fn flatten-reducer
-                              [vs v]
-                              (cond
-                                (symbol? v)
-                                (conj vs v)
-
-                                (coll? v)
-                                (into vs (reduce flatten-reducer [] v))
-
-                                :else
-                                vs))
-                            vars
-                            [pk])
-                           more])]
-                    (recur pairs vars))))]
-    `(async
-       (let [args# (for [~@bindings]
-                     [~@bvars])
-             output#
-             (loop [results# []
-                    args# (seq args#)]
-               (if (nil? args#)
-                 results#
-                 (recur (conj results#
-                              (let [[~@bvars] (first args#)]
-                                ~@body))
-                        (next args#))))]
-         (!<!* output#)))))
+  `(async
+     (let [output# (transient [])]
+       (doseq [~@bindings]
+         (conj! output# (do ~@body)))
+       (!<!* (persistent! output#)))))
 
 (defn async-map
   "Asynchronously returns the result of applying f to
